@@ -7,9 +7,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_scroll_to_top import scroll_to_here
 
-# --- KREDENSIAL TELEGRAM ---
+# --- KREDENSIAL ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
+GSHEET_URL = st.secrets["GSHEET_URL"]
 
 # --- INITIALIZING SESSION STATE ---
 if 'step' not in st.session_state:
@@ -42,18 +43,16 @@ def kirim_ke_telegram(file_stream, nama_panelis):
     payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Form Expert Judgement Masuk: {nama_panelis}"}
     return requests.post(url, data=payload, files=files)
 
-# --- FUNGSI TAMBAHAN: UPDATE GOOGLE SHEETS ---
+# --- FUNGSI TAMBAHAN: UPDATE GOOGLE SHEETS VIA URL ---
 def update_google_sheets(master_data, p_nama):
     try:
-        # 1. Authorize
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
         client = gspread.authorize(creds)
         
-        # 2. Buka spreadsheet (Gunakan nama file verbatim)
-        spreadsheet = client.open("CVI Aiken Zuyy.xlsx")
+        # MENGGUNAKAN URL UNTUK MEMBUKA SHEET
+        spreadsheet = client.open_by_url(GSHEET_URL)
         
-        # Mapping skor ke masing-masing sheet
         aspek_map = {
             "kj": "KEJELASAN",
             "rel": "RELEVANSI",
@@ -64,21 +63,20 @@ def update_google_sheets(master_data, p_nama):
             ws = spreadsheet.worksheet(sheet_name)
             data_all = ws.get_all_values()
             
-            # Cari baris penilai (indeks 1 biasanya kolom B di template Anda)
             row_idx = -1
             for i, row in enumerate(data_all):
+                # Mencari nama di kolom B (indeks 1)
                 if p_nama.lower() in row[1].lower():
                     row_idx = i + 1
                     break
             
             if row_idx != -1:
-                # Kumpulkan skor secara horizontal
                 scores = [[data[key_skor] for data in master_data.values()]]
-                # Update mulai kolom D (kolom ke-4)
+                # Mulai update dari Kolom D (kolom ke-4)
                 start_cell = gspread.utils.rowcol_to_a1(row_idx, 4)
                 ws.update(start_cell, scores)
     except Exception as e:
-        st.warning(f"Catatan: Gagal sinkronisasi ke Google Sheets ({e}), namun file Word tetap diproses.")
+        st.warning(f"Koneksi GSheets gagal: {e}")
 
 # --- UI STYLING ---
 st.set_page_config(page_title="Expert Judgement", layout="centered")
@@ -160,16 +158,7 @@ if st.session_state.step == 0:
     st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
     st.subheader("📝 PETUNJUK PENGISIAN")
     st.info("Mohon dibaca sebelum memberikan penilaian")
-    st.write("Sehubungan dengan upaya pengembangan instrumen penelitian mengenai tingkat pemaafan (forgiveness) pada mahasiswa, kami meminta Bapak/Ibu untuk menilai item-item yang telah kami susun, dari aspek :")
-    st.markdown("""
-    * **Kejelasan**: Kejelasan bahasa yang digunakan apakah sudah sesuai, jelas, dan mudah dipahami.
-    * **Relevansi**: Relevansi aitem alat ukur yang disusun apakah sudah menggambarkan variabel.
-    * **Kesesuaian**: Kesesuaian aitem yang disusun sudah sesuai dengan indikatornya.
-    """)
-    st.write("Penilaian dilakukan dengan memberikan angka 1-4. Skor **0** berarti Anda belum memberikan penilaian.")
-    st.markdown("""
-    0 = "Belum Diisi" | 1 = "Kurang" | 2 = "Cukup" | 3 = "Baik" | 4 = "Baik Sekali"
-    """)
+    st.write("Sehubungan dengan upaya pengembangan instrumen penelitian mengenai tingkat pemaafan (forgiveness) pada mahasiswa, kami meminta Bapak/Ibu untuk menilai item-item yang telah kami susun.")
     
     st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
@@ -206,11 +195,7 @@ elif st.session_state.step in [1, 2, 3]:
                 st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-    errors = []
-    for txt in current_page_items:
-        d = st.session_state.master_data[txt]
-        if d["kj"] == 0 or d["rel"] == 0 or d["kes"] == 0:
-            errors.append(txt)
+    errors = [txt for txt in current_page_items if st.session_state.master_data[txt]["kj"] == 0]
 
     if st.session_state.step == 3:
         st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:", value=st.session_state.saran_global)
@@ -222,25 +207,24 @@ elif st.session_state.step in [1, 2, 3]:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
             if False:
-                st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini. Mohon lengkapi semua skor (tidak boleh 0) sebelum lanjut.")
+                st.error("⚠️ Mohon lengkapi semua skor (tidak boleh 0) sebelum lanjut.")
             else:
                 move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
 elif st.session_state.step == 4:
     st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Menyalin data ke Word & Mengirim Dokumen..."):
+        with st.spinner("Mengirim data ke Word & Google Sheets..."):
             try:
-                # [ADDITION] Sinkronisasi ke Google Sheets
+                # 1. Update ke Google Sheets
                 update_google_sheets(st.session_state.master_data, st.session_state.p_nama)
 
+                # 2. Proses Word
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
-                # 1. Identitas
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                     if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
                 
-                # 2. Tabel Mapping
                 table = doc.tables[0]
                 for row in table.rows:
                     aitem_word = "".join(row.cells[2].text.split()).lower()
@@ -252,7 +236,6 @@ elif st.session_state.step == 4:
                             row.cells[5].text = str(data["kes"])
                             row.cells[6].text = str(data["ket"])
                 
-                # 3. Saran Akhir
                 for row in table.rows:
                     if "Catatan" in row.cells[2].text:
                         row.cells[2].text += "\n" + st.session_state.saran_global
@@ -265,10 +248,8 @@ elif st.session_state.step == 4:
                 st.session_state.submitted = True
                 move_step(5); st.rerun()
             except Exception as e:
-                st.error(f"Terjadi kesalahan teknis: {e}")
-                if st.button("Kembali ke Penilaian"): move_step(3); st.rerun()
-    else:
-        move_step(5); st.rerun()
+                st.error(f"Terjadi kesalahan: {e}")
+                if st.button("Ulangi"): move_step(3); st.rerun()
 
 elif st.session_state.step == 5:
     st.balloons()
@@ -276,10 +257,7 @@ elif st.session_state.step == 5:
         <div class='thanks-card'>
             <h1 style='color: #1E3A8A;'>Terima Kasih! ✨</h1>
             <p style='font-size: 1.2rem; color: #475569;'>
-                Data penilaian Anda telah berhasil kami terima dan dikirimkan ke peneliti. 
-                Kontribusi Anda sangat berharga bagi pengembangan instrumen penelitian ini.
+                Data telah terkirim. Kontribusi Anda sangat berharga bagi riset ini.
             </p>
-            <hr>
-            <p style='font-style: italic; color: #64748b;'>Halaman ini dapat Anda tutup sekarang.</p>
         </div>
     """, unsafe_allow_html=True)
