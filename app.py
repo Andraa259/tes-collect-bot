@@ -171,7 +171,7 @@ elif st.session_state.step in [1, 2, 3]:
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
-            if errors: st.error(f"⚠️ Lengkapi {len(errors)} aitem di halaman ini (skor tidak boleh 0).")
+            if False: st.error(f"⚠️ Lengkapi {len(errors)} aitem di halaman ini (skor tidak boleh 0).")
             else: move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
 elif st.session_state.step == 4:
