@@ -1,15 +1,15 @@
 import streamlit as st
 import pandas as pd
+from docx import Document
 import requests
 import io
-from docx import Document
+import gspread
+from google.oauth2.service_account import Credentials
 from streamlit_scroll_to_top import scroll_to_here
-from streamlit_gsheets import GSheetsConnection
 
 # --- KREDENSIAL ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
-GSHEET_URL = st.secrets["gsheet_url"]
 
 # --- INITIALIZING SESSION STATE ---
 if 'step' not in st.session_state:
@@ -36,10 +36,56 @@ def move_step(step_num):
     st.session_state.step = step_num
     st.session_state.scroll_to_top = True
 
+# --- FUNGSI GOOGLE SHEETS ---
+def update_google_sheets(master_data, p_nama):
+    # 1. Authorize menggunakan secrets
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+    client = gspread.authorize(creds)
+    
+    # 2. Buka spreadsheet (Gunakan nama file versi Google Sheets)
+    spreadsheet = client.open("CVI Aiken Zuyy.xlsx")
+    
+    # Mapping key data ke nama sheet di file kamu
+    aspek_map = {
+        "kj": "KEJELASAN",
+        "rel": "RELEVANSI",
+        "kes": "KESESUAIAN"
+    }
+
+    for key_skor, sheet_name in aspek_map.items():
+        try:
+            ws = spreadsheet.worksheet(sheet_name)
+            # Ambil data untuk mencari baris penilai
+            data_all = ws.get_all_values()
+            
+            # Cari baris penilai berdasarkan nama (Cek kolom B / indeks 1)
+            row_to_update = -1
+            for i, row in enumerate(data_all):
+                if p_nama.lower() in row[1].lower(): # Sesuaikan jika kolom nama bukan di B
+                    row_to_update = i + 1
+                    break
+            
+            if row_to_update == -1:
+                continue # Nama tidak ditemukan di sheet ini, skip
+                
+            # Susun skor dalam satu baris horizontal sesuai urutan input
+            # Kita ambil hanya value skornya saja
+            scores = [[data[key_skor] for data in master_data.values()]]
+            
+            # Update mulai dari kolom D (Aitem 1) pada baris penilai tersebut
+            # 'D' adalah kolom ke-4
+            start_cell = gspread.utils.rowcol_to_a1(row_to_update, 4)
+            ws.update(start_cell, scores)
+            
+        except Exception as e:
+            print(f"Gagal update sheet {sheet_name}: {e}")
+
+# --- FUNGSI TELEGRAM ---
 def kirim_ke_telegram(file_stream, nama_panelis):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    files = {'document': (f'Validasi_{nama_panelis}.docx', file_stream)}
-    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Expert Judgement Masuk: {nama_panelis}"}
+    files = {'document': (f'Form Validasi Expert Judgement Forgiveness_{nama_panelis}.docx', file_stream)}
+    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Form Expert Judgement Masuk: {nama_panelis}"}
     return requests.post(url, data=payload, files=files)
 
 # --- UI STYLING ---
@@ -60,92 +106,130 @@ DEF_OP = "Pemaafan adalah kemampuan individual dalam membingkai ulang terhadap s
 # --- DATA INDIKATOR ---
 data_aspek = {
     "Pemaafan Diri": [
-        ("Indikator 1", ["Aitem 1", "Aitem 2", "Aitem 3", "Aitem 4", "Aitem 5", "Aitem 6"]),
-        ("Indikator 2", ["Aitem 7", "Aitem 8", "Aitem 9", "Aitem 10", "Aitem 11", "Aitem 12"])
+        ("Indikator 1: Kemampuan untuk berhenti menyalahkan diri sendiri", [
+            "Seiring waktu, saya bisa memaklumi kesalahan pribadi yang pernah dilakukan. (Favorable)",
+            "Ketika membuat kesalahan, saya fokus pada perbaikan daripada terus menerus menyalahkan diri sendiri. (Favorable)",
+            "Saya memilih untuk berdamai dengan kekurangan diri sendiri. (Favorable)",
+            "Sulit bagi saya untuk berhenti menyalahkan diri sendiri. (Unfavorable)",
+            "Muncul perasaan benci ketika saya mengingat kesalahan diri sendiri. (Unfavorable)",
+            "Saya terjebak dalam penyesalan atas kegagalan diri sendiri. (Unfavorable)"
+        ]),
+        ("Indikator 2: Kesediaan untuk melepaskan pikiran negatif tentang diri", [
+            "Pikiran negatif tentang diri sendiri mulai memudar seiring waktu. (Favorable)",
+            "Saya dapat memahami diri sendiri atas kesalahan yang telah saya lakukan. (Favorable)",
+            "Saat ingatan yang mengganggu tentang diri sendiri muncul, saya mampu melepaskannya. (Favorable)",
+            "Sulit bagi saya untuk berhenti memikirkan hal-hal buruk yang pernah menimpa diri sendiri. (Unfavorable)",
+            "Pikiran tentang kesalahan diri sendiri terus muncul walaupun sudah berusaha melupakannya. (Unfavorable)",
+            "Saya sering susah berkonsentrasi karena teringat pada kesalahan diri sendiri yang telah lalu. (Unfavorable)"
+        ])
     ],
     "Pemaafan Orang Lain": [
-        ("Indikator 3", ["Aitem 13", "Aitem 14", "Aitem 15", "Aitem 16", "Aitem 17", "Aitem 18"]),
-        ("Indikator 4", ["Aitem 19", "Aitem 20", "Aitem 21", "Aitem 22", "Aitem 23", "Aitem 24"])
+        ("Indikator 3: Kemampuan untuk memahami kesalahan orang lain", [
+            "Saya dapat memaklumi bahwa setiap orang pasti pernah melakukan kekeliruan. (Favorable)",
+            "Saya mencoba memahami alasan dibalik tindakan orang lain yang telah menyakiti saya. (Favorable)",
+            "Saya menyadari bahwa ada alasan tertentu yang membuat orang lain sulit untuk bertindak benar. (Favorable)",
+            "Memandang orang yang menyakiti saya sebagai pribadi yang memiliki karakter buruk. (Unfavorable)",
+            "Saya tidak bisa menerima alasan apapun dari orang yang telah mengecewakan saya. (Unfavorable)",
+            "Sangat sulit bagi saya untuk mengerti mengapa seseorang berbuat jahat kepada saya. (Unfavorable)"
+        ]),
+        ("Indikator 4: Berhenti berpikir buruk tentang orang yang pernah menyakiti", [
+            "Pikiran buruk terhadap orang yang pernah menyakiti saya perlahan mulai menghilang. (Favorable)",
+            "Saya merasa sudah tidak lagi menyimpan kebencian terhadap orang yang pernah menyakiti saya. (Favorable)",
+            "Mudah bagi saya melepaskan rasa benci yang tertuju pada orang yang pernah berbuat salah. (Favorable)",
+            "Saya terus membayangkan hal-hal negatif terjadi pada orang yang telah menyakiti saya. (Unfavorable)",
+            "Sulit bagi saya untuk menghilangkan pandangan negatif terhadap orang yang pernah berbuat salah. (Unfavorable)",
+            "Rasa kesal muncul kembali setiap kali saya mengingat perlakuan orang yang menyakiti saya. (Unfavorable)"
+        ])
     ],
     "Pemaafan Situasi": [
-        ("Indikator 5", ["Aitem 25", "Aitem 26", "Aitem 27", "Aitem 28", "Aitem 29", "Aitem 30"]),
-        ("Indikator 6", ["Aitem 31", "Aitem 32", "Aitem 33", "Aitem 34", "Aitem 35", "Aitem 36"])
+        ("Indikator 5: Kemampuan untuk berdamai dengan keadaan buruk dalam hidup", [
+            "Seiring berjalannya waktu, saya mulai bisa menerima kenyataan pahit yang terjadi dalam hidup dengan lapang dada. (Favorable)",
+            "Saya sadar untuk tidak menyalahkan nasib atas kejadian buruk yang menimpa. (Favorable)",
+            "Mampu menerima kenyataan bahwa hidup tidak selalu berjalan sesuai dengan rencana saya. (Favorable)",
+            "Saya merasa semesta tidak adil karena terus memberikan cobaan yang berat. (Unfavorable)",
+            "Sering merasa terjebak dalam nasib buruk yang seolah-olah tidak pernah berakhir di hidup saya. (Unfavorable)",
+            "Terus-menerus mengeluhkan nasib buruk yang menimpa diri saya menjadi hal yang sulit untuk dihentikan. (Unfavorable)"
+        ]),
+        ("Indikator 6: Melepaskan pikiran negatif terhadap peristiwa luar kendali", [
+            "Pikiran tentang kejadian buruk di masa lalu tidak lagi mengganggu saya untuk berkonsentrasi sehari-hari. (Favorable)",
+            "Saya merasa sudah bisa berdamai dengan bayangan tentang masa-masa sulit yang pernah dialami. (Favorable)",
+            "Saya mampu mengalihkan fokus dari peristiwa yang mengecewakan ke hal-hal yang lebih produktif. (Favorable)",
+            "Sangat sulit bagi saya untuk tidak memikirkan kegagalan yang pernah dialami. (Unfavorable)",
+            "Saya merasa terjebak dalam memori tentang kejadian buruk yang pernah saya alami. (Unfavorable)",
+            "Bayangan mengenai ketidakadilan hidup di masa lalu sering kali muncul tanpa bisa saya kendalikan. (Unfavorable)"
+        ])
     ]
 }
 
 # --- ALUR APLIKASI ---
+
 if st.session_state.step == 0:
     st.title("⚖️ Form Validasi Expert Judgement")
     st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
+    st.subheader("📝 PETUNJUK PENGISIAN")
+    st.info("Mohon dibaca sebelum memberikan penilaian")
+    st.write("Sehubungan dengan upaya pengembangan instrumen penelitian mengenai tingkat pemaafan (forgiveness) pada mahasiswa, kami meminta Bapak/Ibu untuk menilai item-item yang telah kami susun.")
+    
     st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
+    
     if st.button("Mulai Penilaian 🚀"):
-        if st.session_state.p_nama and st.session_state.p_kerja: move_step(1); st.rerun()
-        else: st.error("⚠️ Identitas wajib diisi!")
+        if st.session_state.p_nama == "" or st.session_state.p_kerja == "":
+            st.error("⚠️ Nama dan Pekerjaan wajib diisi!")
+        else: move_step(1); st.rerun()
 
 elif st.session_state.step in [1, 2, 3]:
-    aspek_map = {1: "Pemaafan Diri", 2: "Pemaafan Orang Lain", 3: "Pemaafan Situasi"}
-    aspek_aktif = aspek_map[st.session_state.step]
+    aspek_list = {1: "Pemaafan Diri", 2: "Pemaafan Orang Lain", 3: "Pemaafan Situasi"}
+    aspek_aktif = aspek_list[st.session_state.step]
     st.subheader(f"Aspek: {aspek_aktif}")
+
+    current_page_items = []
+    for _, items in data_aspek[aspek_aktif]:
+        current_page_items.extend(items)
 
     for ind_name, items in data_aspek[aspek_aktif]:
         st.markdown(f"<div class='indicator-header'>{ind_name}</div>", unsafe_allow_html=True)
         for txt in items:
             if txt not in st.session_state.master_data:
                 st.session_state.master_data[txt] = {"kj": 0, "rel": 0, "kes": 0, "ket": ""}
+            
             with st.container():
                 st.markdown("<div class='white-card'>", unsafe_allow_html=True)
                 st.write(f"**{txt}**")
                 c1, c2, c3 = st.columns(3)
+                
                 with c1: st.session_state.master_data[txt]["kj"] = st.selectbox("Kejelasan", [0,1,2,3,4], index=st.session_state.master_data[txt]["kj"], key=f"kj_{txt}")
                 with c2: st.session_state.master_data[txt]["rel"] = st.selectbox("Relevansi", [0,1,2,3,4], index=st.session_state.master_data[txt]["rel"], key=f"rel_{txt}")
                 with c3: st.session_state.master_data[txt]["kes"] = st.selectbox("Kesesuaian", [0,1,2,3,4], index=st.session_state.master_data[txt]["kes"], key=f"kes_{txt}")
-                st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
+                
+                st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
                 st.markdown("</div>", unsafe_allow_html=True)
+
+    errors = [txt for txt in current_page_items if st.session_state.master_data[txt]["kj"] == 0]
+
+    if st.session_state.step == 3:
+        st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:", value=st.session_state.saran_global)
 
     nav1, nav2 = st.columns(2)
     with nav1:
         if st.button("⬅️ Kembali"): move_step(st.session_state.step - 1); st.rerun()
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
-        if st.button(btn_label): move_step(st.session_state.step + 1); st.rerun()
+        if st.button(btn_label):
+            if errors:
+                st.error("⚠️ Mohon lengkapi semua skor sebelum lanjut.")
+            else:
+                move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
 elif st.session_state.step == 4:
+    st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Sedang memproses data..."):
+        with st.spinner("Sinkronisasi Data ke Excel & Telegram..."):
             try:
-                # --- SILENT GSHEETS ENGINE ---
-                conn = st.connection("gsheets", type=GSheetsConnection)
-                all_items = []
-                for asp in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
-                    for _, items in data_aspek[asp]: all_items.extend(items)
-
-                for ws_name, k in zip(["KEJELASAN", "RELEVANSI", "KESESUAIAN"], ["kj", "rel", "kes"]):
-                    df = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0, header=None)
-                    
-                    # Padding Kolom (Pastikan ada 38 kolom: A s/d AL)
-                    while df.shape[1] < 38:
-                        df[df.shape[1]] = ""
-                    
-                    # Padding Baris (Pastikan minimal ada baris ke-33 agar tidak IndexError)
-                    while len(df) < 33:
-                        df.loc[len(df)] = [""] * df.shape[1]
-                    
-                    # Cari baris kosong di rentang Baris 4-33 (Index 3-32)
-                    idx_target = None
-                    for i in range(3, 33):
-                        val_c = str(df.iloc[i, 2]).strip().lower()
-                        if val_c in ["", "nan", "0", "0.0"]:
-                            idx_target = i; break
-                    
-                    if idx_target is not None:
-                        # Isi Horizontal mulai Kolom C (Index 2)
-                        for col_off, item_txt in enumerate(all_items):
-                            df.iloc[idx_target, col_off + 2] = int(st.session_state.master_data[item_txt][k])
-                        
-                        conn.update(spreadsheet=GSHEET_URL, worksheet=ws_name, data=df.fillna(""))
-
-                # --- WORD ENGINE ---
+                # 1. Update ke Google Sheets
+                update_google_sheets(st.session_state.master_data, st.session_state.p_nama)
+                
+                # 2. Generate Word Document
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
@@ -153,26 +237,26 @@ elif st.session_state.step == 4:
                 
                 table = doc.tables[0]
                 for row in table.rows:
-                    aitem_txt = "".join(row.cells[2].text.split()).lower()
-                    for t_ori, d in st.session_state.master_data.items():
-                        if "".join(t_ori.split()).lower()[:50] in aitem_txt:
-                            row.cells[3].text, row.cells[4].text = str(d["kj"]), str(d["rel"])
-                            row.cells[5].text, row.cells[6].text = str(d["kes"]), str(d["ket"])
+                    aitem_word = "".join(row.cells[2].text.split()).lower()
+                    for txt_ori, data in st.session_state.master_data.items():
+                        txt_normalized = "".join(txt_ori.split()).lower()
+                        if txt_normalized[:60] in aitem_word:
+                            row.cells[3].text = str(data["kj"])
+                            row.cells[4].text = str(data["rel"])
+                            row.cells[5].text = str(data["kes"])
+                            row.cells[6].text = str(data["ket"])
                 
-                if "saran_global" in st.session_state:
-                    for row in table.rows:
-                        if "Catatan" in row.cells[2].text: row.cells[2].text += f"\n{st.session_state.saran_global}"
-
-                buf = io.BytesIO(); doc.save(buf); buf.seek(0)
+                # 3. Kirim ke Telegram
+                buf = io.BytesIO()
+                doc.save(buf)
+                buf.seek(0)
                 kirim_ke_telegram(buf, st.session_state.p_nama)
                 
                 st.session_state.submitted = True
                 move_step(5); st.rerun()
-
             except Exception as e:
-                st.error("Terjadi kendala teknis. Mohon hubungi peneliti.")
-                if st.button("Coba Lagi"): st.rerun()
-    else: move_step(5); st.rerun()
+                st.error(f"Terjadi kesalahan: {e}")
+                if st.button("Ulangi"): move_step(3); st.rerun()
 
 elif st.session_state.step == 5:
     st.balloons()
@@ -180,8 +264,7 @@ elif st.session_state.step == 5:
         <div class='thanks-card'>
             <h1 style='color: #1E3A8A;'>Terima Kasih! ✨</h1>
             <p style='font-size: 1.2rem; color: #475569;'>
-                Data penilaian Anda telah berhasil kami terima dan dikirimkan ke peneliti. 
-                Kontribusi Anda sangat berharga bagi pengembangan instrumen penelitian ini.
+                Data penilaian Anda telah berhasil kami terima, tercatat di database Excel, dan dikirimkan ke peneliti via Telegram.
             </p>
             <hr>
             <p style='font-style: italic; color: #64748b;'>Halaman ini dapat Anda tutup sekarang.</p>
