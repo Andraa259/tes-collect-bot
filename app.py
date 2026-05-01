@@ -81,7 +81,7 @@ if st.session_state.step == 0:
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
     if st.button("Mulai Penilaian 🚀"):
         if st.session_state.p_nama and st.session_state.p_kerja: move_step(1); st.rerun()
-        else: st.error("⚠️ Nama dan Pekerjaan wajib diisi!")
+        else: st.error("⚠️ Identitas wajib diisi!")
 
 elif st.session_state.step in [1, 2, 3]:
     aspek_list = {1: "Pemaafan Diri", 2: "Pemaafan Orang Lain", 3: "Pemaafan Situasi"}
@@ -111,54 +111,73 @@ elif st.session_state.step in [1, 2, 3]:
         if st.button("⬅️ Kembali"): move_step(st.session_state.step - 1); st.rerun()
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
-        if st.button(btn_label): move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
+        if st.button(btn_label): move_step(st.session_state.step + 1); st.rerun()
 
 elif st.session_state.step == 4:
-    st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Mencatat ke Google Sheets & Word..."):
+        with st.spinner("Sedang memproses data..."):
             try:
-                # --- LOGIKA GSHEETS: TARGET KOLOM C (Index 2) ---
                 conn = st.connection("gsheets", type=GSheetsConnection)
+                
+                # Susun list aitem murni
                 all_ordered_items = []
                 for asp in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
                     for _, items in data_aspek[asp]: all_ordered_items.extend(items)
 
+                # --- PROSES GSHEETS (SILENT MODE) ---
                 for ws_name, k in zip(["KEJELASAN", "RELEVANSI", "KESESUAIAN"], ["kj", "rel", "kes"]):
-                    df_old = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0, header=None)
+                    df = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0, header=None)
                     
-                    # Pastikan struktur DataFrame minimal punya 38 kolom (A s/d AL)
-                    while df_old.shape[1] < 38:
-                        df_old[df_old.shape[1]] = ""
+                    # Pastikan lebar dataframe minimal 38 kolom (A s/d AL) agar Index 2 adalah Kolom C
+                    if df.shape[1] < 38:
+                        for c in range(df.shape[1], 38): df[c] = ""
                     
-                    # Cari baris kosong di rentang baris 4 s/d 33 (Index Pandas 3 s/d 32)
+                    # Cari baris kosong di Baris 4-33 (Index 3-32)
                     idx_target = None
                     for i in range(3, 33):
-                        if i >= len(df_old) or str(df_old.iloc[i, 2]).strip() in ["", "nan", "0"]:
+                        if i >= len(df) or str(df.iloc[i, 2]).strip() in ["", "nan", "0", "0.0"]:
                             idx_target = i; break
                     
                     if idx_target is not None:
-                        # Buat baris baru jika diperlukan
-                        while idx_target >= len(df_old):
-                            df_old.loc[len(df_old)] = [""] * df_old.shape[1]
+                        while idx_target >= len(df):
+                            df.loc[len(df)] = [""] * df.shape[1]
                         
-                        # Isi Horizontal: Aitem 1 di Kolom C (Index 2), Aitem 2 di D (Index 3), dst.
+                        # Isi Horizontal mulai Kolom C (Index 2)
                         for col_offset, item_txt in enumerate(all_ordered_items):
-                            df_old.iloc[idx_target, col_offset + 2] = st.session_state.master_data[item_txt][k]
+                            df.iloc[idx_target, col_offset + 2] = int(st.session_state.master_data[item_txt][k])
                         
-                        conn.update(spreadsheet=GSHEET_URL, worksheet=ws_name, data=df_old.fillna(""))
+                        conn.update(spreadsheet=GSHEET_URL, worksheet=ws_name, data=df.fillna(""))
 
-                # --- WORD & TELEGRAM ---
+                # --- PROSES WORD ---
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
-                # (Logika Word tetap sama)
-                buf = io.BytesIO(); doc.save(buf); buf.seek(0)
+                for p in doc.paragraphs:
+                    if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
+                    if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
+                
+                table = doc.tables[0]
+                for row in table.rows:
+                    aitem_word = "".join(row.cells[2].text.split()).lower()
+                    for txt_ori, data in st.session_state.master_data.items():
+                        if "".join(txt_ori.split()).lower()[:50] in aitem_word:
+                            row.cells[3].text, row.cells[4].text = str(data["kj"]), str(data["rel"])
+                            row.cells[5].text, row.cells[6].text = str(data["kes"]), str(data["ket"])
+                
+                for row in table.rows:
+                    if "Catatan" in row.cells[2].text: row.cells[2].text += f"\n{st.session_state.saran_global}"
+
+                buf = io.BytesIO()
+                doc.save(buf)
+                buf.seek(0)
                 kirim_ke_telegram(buf, st.session_state.p_nama)
                 
                 st.session_state.submitted = True
                 move_step(5); st.rerun()
+
             except Exception as e:
-                st.error(f"Terjadi kesalahan teknis: {e}")
+                st.error("Terjadi kendala saat mengirim data. Silakan coba beberapa saat lagi.")
                 if st.button("Coba Lagi"): st.rerun()
+    else:
+        move_step(5); st.rerun()
 
 elif st.session_state.step == 5:
     st.balloons()
