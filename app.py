@@ -2,6 +2,7 @@ import streamlit as st
 from docx import Document
 import requests
 import io
+import pandas as pd  # <-- Tambahan penting agar pd.isna() berfungsi
 from streamlit_scroll_to_top import scroll_to_here
 from streamlit_gsheets import GSheetsConnection
 
@@ -69,7 +70,7 @@ data_aspek = {
         ("Indikator 2: Kesediaan untuk melepaskan pikiran negatif tentang diri", [
             "Pikiran negatif tentang diri sendiri mulai memudar seiring waktu. (Favorable)",
             "Saya dapat memahami diri sendiri atas kesalahan yang telah saya lakukan. (Favorable)",
-            "Saat ingatan yang mengganggu tentang diri sendiri muncul, saya mampu melepaskannya. (Favorable)",
+            "Saat  ingatan yang mengganggu tentang diri sendiri muncul, saya mampu melepaskannya. (Favorable)",
             "Sulit bagi saya untuk berhenti memikirkan hal-hal buruk yang pernah menimpa diri sendiri. (Unfavorable)",
             "Pikiran tentang kesalahan diri sendiri terus muncul walaupun sudah berusaha melupakannya. (Unfavorable)",
             "Saya sering susah berkonsentrasi karena teringat pada kesalahan diri sendiri yang telah lalu. (Unfavorable)"
@@ -196,7 +197,7 @@ elif st.session_state.step == 4:
                 # 1. KONEKSI KE GSHEETS
                 conn = st.connection("gsheets", type=GSheetsConnection)
 
-                # 2. URUTKAN AITEM (Agar urutan kolom C, D, E... sesuai dengan Aitem 1, 2, 3...)
+                # 2. URUTKAN AITEM (Agar urutan kolom sesuai Aitem 1-36)
                 all_ordered_items = []
                 for aspect in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
                     for ind_name, items in data_aspek[aspect]:
@@ -206,44 +207,33 @@ elif st.session_state.step == 4:
                 worksheets = ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]
                 keys = ["kj", "rel", "kes"]
 
-                # Loop untuk mengisi masing-masing sheet secara horizontal
-                for ws_name, k in zip(worksheets, keys): # Tadi typo 'dalam', sekarang sudah 'in'
-                    # Ambil data lama
+                for ws_name, k in zip(worksheets, keys):
                     df_old = conn.read(worksheet=ws_name, ttl=0) 
                     
-                    # Siapkan baris baru: [Nama, Skor1, Skor2, ... Skor36]
                     new_entry = [st.session_state.p_nama]
                     for item_text in all_ordered_items:
                         new_entry.append(st.session_state.master_data[item_text][k])
                     
-                    # Cari baris kosong antara baris 3 s/d 32
                     idx_target = None
-                    for i in range(2, 32): # Indeks 2 adalah baris 3
-                        # Cek apakah sel nama di Kolom B (index 1) kosong
+                    for i in range(2, 32): 
                         if i >= len(df_old) or pd.isna(df_old.iloc[i, 1]) or str(df_old.iloc[i, 1]).strip() == "":
                             idx_target = i
                             break
                     
                     if idx_target is not None:
-                        # Masukkan data secara horizontal mulai dari Kolom B (index 1)
                         for col_idx, value in enumerate(new_entry):
-                            # Pastikan dataframe cukup besar untuk menampung kolom
                             if col_idx + 1 < df_old.shape[1]:
                                 df_old.iloc[idx_target, col_idx + 1] = value
-                        
-                        # Kirim update ke GSheets
                         conn.update(worksheet=ws_name, data=df_old)
                     else:
-                        st.warning(f"Sheet {ws_name} sudah penuh (maksimal 30 panelis).")
+                        st.warning(f"Sheet {ws_name} sudah penuh.")
 
                 # --- 3. PROSES FILE WORD ---
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
-                # Identitas
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                     if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
                 
-                # Tabel
                 table = doc.tables[0]
                 for row in table.rows:
                     aitem_word = "".join(row.cells[2].text.split()).lower()
@@ -262,7 +252,6 @@ elif st.session_state.step == 4:
                 # --- 4. KIRIM KE TELEGRAM ---
                 kirim_ke_telegram(buf, st.session_state.p_nama)
 
-                # SELESAI
                 st.session_state.submitted = True
                 move_step(5)
                 st.rerun()
@@ -270,7 +259,6 @@ elif st.session_state.step == 4:
             except Exception as e:
                 st.error(f"Terjadi kesalahan teknis: {e}")
                 if st.button("Coba Lagi"): st.rerun()
-
     else:
         move_step(5)
         st.rerun()
@@ -288,4 +276,3 @@ elif st.session_state.step == 5:
             <p style='font-style: italic; color: #64748b;'>Halaman ini dapat Anda tutup sekarang.</p>
         </div>
     """, unsafe_allow_html=True)
-    # Tidak ada tombol di sini untuk mencegah pengiriman ulang.
