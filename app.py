@@ -211,7 +211,7 @@ elif st.session_state.step == 4:
                 for ws_name, k in zip(worksheets, keys):
                     # Ambil data lama
                     df_old = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0) 
-                    df_old = df_old.fillna("") # Bersihkan NaN agar tidak error 400
+                    df_old = df_old.fillna(0)
                     
                     # Siapkan baris data baru untuk penilai ini (Horizontal)
                     new_entry = [st.session_state.p_nama]
@@ -234,6 +234,8 @@ elif st.session_state.step == 4:
                         for col_idx, value in enumerate(new_entry):
                             if col_idx + 1 < df_old.shape[1]:
                                 df_old.iloc[idx_target, col_idx + 1] = value
+
+                        df_old = df_old.fillna(0)
                         
                         # Kirim kembali ke GSheets
                         conn.update(spreadsheet=GSHEET_URL, worksheet=ws_name, data=df_old)
