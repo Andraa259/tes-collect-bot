@@ -4,12 +4,12 @@ import requests
 import io
 from streamlit_scroll_to_top import scroll_to_here
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection # Tambahan import untuk koneksi
+from streamlit_gsheets import GSheetsConnection
 
 # --- KREDENSIAL ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
-GSHEET_URL = st.secrets["gsheet_url"] # Pastikan gsheet_url ada di secrets
+GSHEET_URL = st.secrets["gsheet_url"]
 
 # --- INITIALIZING SESSION STATE ---
 if 'step' not in st.session_state:
@@ -183,7 +183,7 @@ elif st.session_state.step in [1, 2, 3]:
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
-            if False:
+            if errors:
                 st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini. Mohon lengkapi semua skor (tidak boleh 0) sebelum lanjut.")
             else:
                 move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
@@ -191,12 +191,10 @@ elif st.session_state.step in [1, 2, 3]:
 elif st.session_state.step == 4:
     st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Mencatat ke Google Sheets, Word & Mengirim Dokumen..."):
+        with st.spinner("Menyalin data ke Word & Mengirim Dokumen..."):
             try:
-                # --- TAMBAHAN: LOGIKA GSHEETS (Mulai dari sini) ---
+                # --- LOGIKA GSHEETS FIX: Mencegah Rata Kiri ---
                 conn = st.connection("gsheets", type=GSheetsConnection)
-                
-                # Urutkan semua 36 aitem agar konsisten
                 all_ordered_items = []
                 for asp in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
                     for _, items in data_aspek[asp]:
@@ -206,41 +204,41 @@ elif st.session_state.step == 4:
                 keys = ["kj", "rel", "kes"]
 
                 for ws_name, k in zip(worksheets, keys):
-                    # Baca data lama
                     df_old = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0)
                     
-                    # Cari baris kosong pertama di rentang Excel baris 4 s/d 33 (Index Pandas 2 s/d 31)
+                    # FORCE PADDING: Jika kolom A dan B hilang, masukkan kolom kosong manual
+                    # Kita butuh total 38 kolom (A, B, + 36 aitem)
+                    while df_old.shape[1] < 38:
+                        df_old.insert(0, f"blank_{df_old.shape[1]}", "")
+                    
+                    # Cari baris kosong di rentang baris 4 s/d 33 (Index Pandas 3 s/d 32)
                     idx_target = None
-                    for i in range(2, 32): 
-                        # Cek kolom C (Index 2) apakah kosong
+                    for i in range(3, 33): 
                         if i >= len(df_old) or str(df_old.iloc[i, 2]).strip() in ["", "nan", "0"]:
                             idx_target = i
                             break
                     
                     if idx_target is not None:
-                        # Jika baris belum ada di dataframe, buat baris baru
                         while idx_target >= len(df_old):
                             df_old = pd.concat([df_old, pd.DataFrame([[""] * df_old.shape[1]], columns=df_old.columns)], ignore_index=True)
                         
                         # Isi data Horizontal mulai dari Kolom C (Index 2)
                         for col_offset, item_txt in enumerate(all_ordered_items):
-                            col_index = col_offset + 2 # Mulai dari kolom C
-                            val = st.session_state.master_data[item_txt][k]
-                            if col_index < df_old.shape[1]:
-                                df_old.iloc[idx_target, col_index] = val
+                            df_old.iloc[idx_target, col_offset + 2] = st.session_state.master_data[item_txt][k]
                         
-                        # Update Google Sheets
+                        # Pastikan kolom A dan B tetap bersih
+                        df_old.iloc[idx_target, 0] = "" # Kolom A
+                        df_old.iloc[idx_target, 1] = "" # Kolom B
+                        
+                        # Update seluruh sheet
                         conn.update(spreadsheet=GSHEET_URL, worksheet=ws_name, data=df_old.fillna(""))
-                # --- AKHIR LOGIKA GSHEETS ---
 
-                # (KODE ASLI KAMU LANJUT DI SINI)
+                # --- PROSES WORD & TELEGRAM ---
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
-                # 1. Identitas
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                     if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
                 
-                # 2. Tabel Mapping
                 table = doc.tables[0]
                 for row in table.rows:
                     aitem_word = "".join(row.cells[2].text.split()).lower()
@@ -252,7 +250,6 @@ elif st.session_state.step == 4:
                             row.cells[5].text = str(data["kes"])
                             row.cells[6].text = str(data["ket"])
                 
-                # 3. Saran Akhir
                 for row in table.rows:
                     if "Catatan" in row.cells[2].text:
                         row.cells[2].text += "\n" + st.session_state.saran_global
