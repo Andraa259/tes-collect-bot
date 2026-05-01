@@ -3,6 +3,7 @@ from docx import Document
 import requests
 import io
 from streamlit_scroll_to_top import scroll_to_here
+from streamlit_gsheets import GSheetsConnection
 
 # --- KREDENSIAL TELEGRAM ---
 TOKEN = st.secrets["TOKEN"]
@@ -185,19 +186,67 @@ elif st.session_state.step in [1, 2, 3]:
             else:
                 move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
+# --- FUNGSI PROSES DATA ---
 elif st.session_state.step == 4:
     st.title("Sedang Memproses...")
-    # Double-check submitted flag to prevent re-runs if page refreshes
+    
     if not st.session_state.submitted:
-        with st.spinner("Menyalin data ke Word & Mengirim Dokumen..."):
+        with st.spinner("Mencatat ke Excel, Word, & Mengirim ke Telegram..."):
             try:
+                # 1. KONEKSI KE GSHEETS (Via URL di Secrets)
+                conn = st.connection("gsheets", type=GSheetsConnection)
+
+                # 2. PREPARASI DATA SKOR (Urutan Aitem 1-36)
+                all_ordered_items = []
+                for aspect in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
+                    for ind_name, items in data_aspek[aspect]:
+                        all_ordered_items.extend(items)
+                
+                # Buat baris data baru: [Nama, Skor1, Skor2, ..., Skor36]
+                new_row_data = [st.session_state.p_nama]
+                for item_text in all_ordered_items:
+                    score = st.session_state.master_data.get(item_text, {"kj":0}) # Default ambil salah satu kriteria
+                    # Karena kita butuh 3 kriteria, kita akan proses per sheet nanti
+                    pass
+
+                # --- PROSES UPDATE 3 SHEET DI GSHEETS ---
+                worksheets = ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]
+                keys = ["kj", "rel", "kes"]
+
+                for ws_name, k dalam zip(worksheets, keys):
+                    # Ambil data lama dari GSheet
+                    df_old = conn.read(worksheet=ws_name, ttl=0) 
+                    
+                    # Buat baris baru untuk penilai ini
+                    new_entry = [st.session_state.p_nama]
+                    for item_text in all_ordered_items:
+                        new_entry.append(st.session_state.master_data[item_text][k])
+                    
+                    # Cari baris kosong pertama (antara baris 3 s/d 32)
+                    # Kita asumsikan Kolom B (Index 1) adalah Nama Penilai
+                    # Jika nama masih kosong di baris tersebut, kita isi
+                    idx_target = None
+                    for i in range(2, 32): # Baris 3 sampai 32
+                        if i >= len(df_old) or pd.isna(df_old.iloc[i, 1]) or df_old.iloc[i, 1] == "":
+                            idx_target = i
+                            break
+                    
+                    if idx_target is not None:
+                        # Update dataframe pada posisi tersebut
+                        # Sesuaikan kolom (B adalah index 1, C dst adalah index 2 ke atas)
+                        for col_idx, value in enumerate(new_entry):
+                            df_old.iloc[idx_target, col_idx + 1] = value
+                        
+                        # Tulis kembali ke GSheets
+                        conn.update(worksheet=ws_name, data=df_old)
+
+                # --- 3. PROSES FILE WORD (Fitur Lama) ---
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
-                # 1. Identitas
+                # (Bagian edit identitas & tabel Word sama seperti kode sebelumnya)
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                     if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
                 
-                # 2. Tabel Mapping
                 table = doc.tables[0]
                 for row in table.rows:
                     aitem_word = "".join(row.cells[2].text.split()).lower()
@@ -208,26 +257,26 @@ elif st.session_state.step == 4:
                             row.cells[4].text = str(data["rel"])
                             row.cells[5].text = str(data["kes"])
                             row.cells[6].text = str(data["ket"])
-                
-                # 3. Saran Akhir
-                for row in table.rows:
-                    if "Catatan" in row.cells[2].text:
-                        row.cells[2].text += "\n" + st.session_state.saran_global
 
                 buf = io.BytesIO()
                 doc.save(buf)
                 buf.seek(0)
+
+                # --- 4. KIRIM KE TELEGRAM ---
                 kirim_ke_telegram(buf, st.session_state.p_nama)
-                
-                # Mark as submitted and move to Thank You page
+
+                # SELESAI
                 st.session_state.submitted = True
-                move_step(5); st.rerun()
+                move_step(5)
+                st.rerun()
+
             except Exception as e:
-                st.error(f"Terjadi kesalahan teknis: {e}")
-                if st.button("Kembali ke Penilaian"): move_step(3); st.rerun()
+                st.error(f"Terjadi kesalahan: {e}")
+                if st.button("Coba Lagi"): st.rerun()
+
     else:
-        # If somehow we land here but already submitted, move to step 5
-        move_step(5); st.rerun()
+        move_step(5)
+        st.rerun()
 
 elif st.session_state.step == 5:
     st.balloons()
