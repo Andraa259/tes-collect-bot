@@ -212,7 +212,7 @@ elif st.session_state.step == 4:
                     # Ambil data lama
                     st.write(f"Mencoba membaca sheet: '{ws_name}'") # Gunakan kutipan untuk melihat spasi
                     st.write(f"URL yang digunakan: {GSHEET_URL}")
-                    df_old = conn.read(worksheet=ws_name, ttl=0) 
+                    df_old = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0) 
                     df_old = df_old.fillna(0)
                     
                     # Siapkan baris data baru untuk penilai ini (Horizontal)
