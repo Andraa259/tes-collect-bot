@@ -277,7 +277,8 @@ elif st.session_state.step == 4:
                 st.rerun()
 
             except Exception as e:
-                st.error(f"Terjadi kesalahan teknis: {e}")
+                st.error("Terjadi kesalahan teknis:")
+                st.exception(e)  # Ini akan menampilkan traceback lengkap
                 if st.button("Coba Lagi"): st.rerun()
     else:
         move_step(5)
