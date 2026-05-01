@@ -37,19 +37,17 @@ def move_step(step_num):
     st.session_state.step = step_num
     st.session_state.scroll_to_top = True
 
-# --- FUNGSI UPDATE GOOGLE SHEETS (HARD FAIL) ---
+# --- FUNGSI UPDATE GOOGLE SHEETS (KHUSUS SKOR DI KOLOM C) ---
 def update_google_sheets(master_data, p_nama):
     try:
-        # 1. Authorize
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
         client = gspread.authorize(creds)
         
-        # 2. Buka spreadsheet via URL
-        # Nama file referensi: CVI Aiken Zuyy.xlsx
+        # Buka file verbatim: CVI Aiken Zuyy.xlsx
         spreadsheet = client.open_by_url(GSHEET_URL)
         
-        # Mapping skor ke masing-masing sheet
+        # Daftar aspek/sheet yang akan diisi
         aspek_map = {
             "kj": "KEJELASAN",
             "rel": "RELEVANSI",
@@ -60,7 +58,7 @@ def update_google_sheets(master_data, p_nama):
             ws = spreadsheet.worksheet(sheet_name)
             data_all = ws.get_all_values()
             
-            # Cari baris penilai (asumsi nama ada di kolom B / indeks 1)
+            # Cari baris penilai (Lookup Nama tetap di Kolom B / Indeks 1)
             row_idx = -1
             for i, row in enumerate(data_all):
                 if p_nama.lower() in row[1].lower():
@@ -68,21 +66,21 @@ def update_google_sheets(master_data, p_nama):
                     break
             
             if row_idx != -1:
-                # Susun skor secara horizontal sesuai urutan aitem
-                scores = [[data[key_skor] for data in master_data.values()]]
-                # Update mulai dari Kolom D (kolom ke-4)
-                start_cell = gspread.utils.rowcol_to_a1(row_idx, 4)
-                ws.update(start_cell, scores)
+                # Ambil skor saja sebagai angka agar tidak merusak format sel
+                scores = [[int(data[key_skor]) for data in master_data.values()]]
+                
+                # MULAI DARI KOLOM C (Kolom ke-3)
+                # rowcol_to_a1(row_idx, 3) akan menghasilkan C{row_idx}
+                start_cell = gspread.utils.rowcol_to_a1(row_idx, 3)
+                
+                # Update hanya range skor tersebut, kolom sebelumnya aman
+                ws.update(start_cell, scores, value_input_option='RAW')
             else:
-                # Jika nama tidak ditemukan di salah satu sheet, hentikan proses
                 st.error(f"❌ Nama '{p_nama}' tidak ditemukan di sheet {sheet_name}!")
-                st.info("Pastikan nama Anda sudah terdaftar di file CVI Aiken Zuyy.xlsx sebelum mengisi form.")
                 st.stop()
 
     except Exception as e:
-        # Jika koneksi gagal, paksa berhenti agar data tetap integritas
         st.error(f"⚠️ KONEKSI GOOGLE SHEETS GAGAL: {e}")
-        st.info("Proses dihentikan secara otomatis. Data tidak dikirim ke Telegram.")
         st.stop()
 
 def kirim_ke_telegram(file_stream, nama_panelis):
@@ -208,11 +206,7 @@ elif st.session_state.step in [1, 2, 3]:
                 st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-    errors = []
-    for txt in current_page_items:
-        d = st.session_state.master_data[txt]
-        if d["kj"] == 0 or d["rel"] == 0 or d["kes"] == 0:
-            errors.append(txt)
+    errors = [txt for txt in current_page_items if st.session_state.master_data[txt]["kj"] == 0]
 
     if st.session_state.step == 3:
         st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:", value=st.session_state.saran_global)
@@ -223,20 +217,20 @@ elif st.session_state.step in [1, 2, 3]:
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
-            if False:
-                st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
+            if errors:
+                st.error("⚠️ Mohon lengkapi semua skor sebelum lanjut.")
             else:
                 move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
 elif st.session_state.step == 4:
     st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Sinkronisasi Data ke Google Sheets & Mengirim Dokumen..."):
+        with st.spinner("Sinkronisasi Skor ke Google Sheets & Telegram..."):
             try:
-                # 1. Update Google Sheets Terlebih Dahulu (HARD FAIL)
+                # 1. Update ke Google Sheets (HARD FAIL)
                 update_google_sheets(st.session_state.master_data, st.session_state.p_nama)
 
-                # 2. Jika GSheets Berhasil, Baru Lanjut ke Word
+                # 2. Proses Word
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
@@ -276,7 +270,7 @@ elif st.session_state.step == 5:
         <div class='thanks-card'>
             <h1 style='color: #1E3A8A;'>Terima Kasih! ✨</h1>
             <p style='font-size: 1.2rem; color: #475569;'>
-                Data penilaian Anda telah berhasil dicatat di Excel dan dikirimkan ke peneliti.
+                Skor Anda telah berhasil tercatat di database Excel dan terkirim ke peneliti.
             </p>
             <hr>
             <p style='font-style: italic; color: #64748b;'>Halaman ini dapat Anda tutup sekarang.</p>
