@@ -39,7 +39,7 @@ def move_step(step_num):
 def kirim_ke_telegram(file_stream, nama_panelis):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
     files = {'document': (f'Form Validasi_{nama_panelis}.docx', file_stream)}
-    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Form Expert Judgement Masuk: {nama_panelis}"}
+    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Expert Judgement Masuk: {nama_panelis}"}
     return requests.post(url, data=payload, files=files)
 
 # --- UI STYLING ---
@@ -104,80 +104,75 @@ elif st.session_state.step in [1, 2, 3]:
                 st.markdown("</div>", unsafe_allow_html=True)
 
     if st.session_state.step == 3:
-        st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:")
+        st.session_state.saran_global = st.text_area("Saran Keseluruhan:")
 
     nav1, nav2 = st.columns(2)
     with nav1:
         if st.button("⬅️ Kembali"): move_step(st.session_state.step - 1); st.rerun()
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
-        if st.button(btn_label): move_step(st.session_state.step + 1); st.rerun()
+        if st.button(btn_label): move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
 elif st.session_state.step == 4:
     if not st.session_state.submitted:
-        with st.spinner("Sedang memproses data..."):
+        with st.spinner("Sedang memproses data secara aman..."):
             try:
                 conn = st.connection("gsheets", type=GSheetsConnection)
-                
-                # Susun list aitem murni
                 all_ordered_items = []
                 for asp in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
                     for _, items in data_aspek[asp]: all_ordered_items.extend(items)
 
-                # --- PROSES GSHEETS (SILENT MODE) ---
                 for ws_name, k in zip(["KEJELASAN", "RELEVANSI", "KESESUAIAN"], ["kj", "rel", "kes"]):
+                    # Baca GSheets tanpa header agar koordinat kaku (Header=None)
                     df = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0, header=None)
                     
-                    # Pastikan lebar dataframe minimal 38 kolom (A s/d AL) agar Index 2 adalah Kolom C
-                    if df.shape[1] < 38:
-                        for c in range(df.shape[1], 38): df[c] = ""
-                    
-                    # Cari baris kosong di Baris 4-33 (Index 3-32)
+                    # Cari baris kosong di rentang baris 4 s/d 33 (Index Pandas 3 s/d 32)
+                    # Fokus pada Kolom C (Index 2)
                     idx_target = None
                     for i in range(3, 33):
                         if i >= len(df) or str(df.iloc[i, 2]).strip() in ["", "nan", "0", "0.0"]:
                             idx_target = i; break
                     
                     if idx_target is not None:
-                        while idx_target >= len(df):
-                            df.loc[len(df)] = [""] * df.shape[1]
+                        # Pastikan dataframe cukup baris/kolomnya
+                        while idx_target >= len(df): df.loc[len(df)] = [""] * df.shape[1]
+                        while df.shape[1] < 38: df[df.shape[1]] = ""
                         
-                        # Isi Horizontal mulai Kolom C (Index 2)
+                        # UPDATE HANYA KOLOM C DAN SETERUSNYA (Index 2 ke atas)
                         for col_offset, item_txt in enumerate(all_ordered_items):
-                            df.iloc[idx_target, col_offset + 2] = int(st.session_state.master_data[item_txt][k])
+                            target_col = col_offset + 2
+                            if target_col < df.shape[1]:
+                                df.iloc[idx_target, target_col] = int(st.session_state.master_data[item_txt][k])
                         
+                        # Simpan tanpa merubah baris judul di atas atau kolom A & B
                         conn.update(spreadsheet=GSHEET_URL, worksheet=ws_name, data=df.fillna(""))
 
-                # --- PROSES WORD ---
+                # WORD & TELEGRAM
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                     if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
-                
                 table = doc.tables[0]
                 for row in table.rows:
                     aitem_word = "".join(row.cells[2].text.split()).lower()
-                    for txt_ori, data in st.session_state.master_data.items():
-                        if "".join(txt_ori.split()).lower()[:50] in aitem_word:
-                            row.cells[3].text, row.cells[4].text = str(data["kj"]), str(data["rel"])
-                            row.cells[5].text, row.cells[6].text = str(data["kes"]), str(data["ket"])
+                    for t_ori, d in st.session_state.master_data.items():
+                        if "".join(t_ori.split()).lower()[:50] in aitem_word:
+                            row.cells[3].text, row.cells[4].text = str(d["kj"]), str(d["rel"])
+                            row.cells[5].text, row.cells[6].text = str(d["kes"]), str(d["ket"])
                 
                 for row in table.rows:
                     if "Catatan" in row.cells[2].text: row.cells[2].text += f"\n{st.session_state.saran_global}"
 
-                buf = io.BytesIO()
-                doc.save(buf)
-                buf.seek(0)
+                buf = io.BytesIO(); doc.save(buf); buf.seek(0)
                 kirim_ke_telegram(buf, st.session_state.p_nama)
                 
                 st.session_state.submitted = True
                 move_step(5); st.rerun()
 
             except Exception as e:
-                st.error("Terjadi kendala saat mengirim data. Silakan coba beberapa saat lagi.")
+                st.error("Terjadi kendala teknis. Mohon hubungi peneliti.")
                 if st.button("Coba Lagi"): st.rerun()
-    else:
-        move_step(5); st.rerun()
+    else: move_step(5); st.rerun()
 
 elif st.session_state.step == 5:
     st.balloons()
