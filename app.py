@@ -6,7 +6,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_scroll_to_top import scroll_to_here
 
-# --- KREDENSIAL TELEGRAM & GSHEETS ---
+# --- KREDENSIAL & KONFIGURASI ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
 
@@ -33,7 +33,6 @@ if 'submitted' not in st.session_state:
     st.session_state.submitted = False
 
 # --- LOGIKA SCROLL ---
-# Ditempatkan di awal untuk merespon state perubahan step secepat mungkin
 if st.session_state.scroll_to_top:
     scroll_to_here(0, key=f'scroll_step_{st.session_state.step}') 
     st.session_state.scroll_to_top = False
@@ -42,11 +41,11 @@ def move_step(step_num):
     st.session_state.step = step_num
     st.session_state.scroll_to_top = True
 
-# --- FUNGSI UPDATE GSHEETS (HARD FAIL) ---
+# --- FUNGSI UPDATE GSHEETS (HARD FAIL & SURGICAL) ---
 def update_gsheets_scores(master_data, data_aspek):
     try:
         client = get_gsheets_client()
-        # Buka file verbatim sesuai permintaan
+        # Buka file verbatim: CVI Aiken Zuyy.xlsx
         spreadsheet = client.open("CVI Aiken Zuyy.xlsx")
         
         sheets_mapping = {
@@ -55,41 +54,41 @@ def update_gsheets_scores(master_data, data_aspek):
             "kes": "KESESUAIAN"
         }
 
-        # Urutan aitem harus tetap (4-33)
+        # Urutan item sesuai tampilan UI untuk mengisi baris 4-33
         all_ordered_items = []
         for aspek in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
             for _, items in data_aspek[aspek]:
                 all_ordered_items.extend(items)
         
-        # Ambil 30 aitem pertama untuk rentang baris 4-33
-        ordered_items_30 = all_ordered_items[:30]
+        ordered_items_30 = all_ordered_items[:30] # Batasi 30 aitem
 
         for score_key, sheet_name in sheets_mapping.items():
             sheet = spreadsheet.worksheet(sheet_name)
             
-            # Cek baris ke-4 untuk menentukan kolom kosong berikutnya (mulai dari C/kolom 3)
-            # Kolom A & B tidak boleh diubah
+            # Cari kolom kosong mulai dari kolom C (index 3)
+            # Mengecek baris ke-4 untuk menentukan kolom penilai berikutnya
             row_4_values = sheet.row_values(4)
             next_col = len(row_4_values) + 1
-            if next_col < 3: next_col = 3 # Start minimal di kolom C
+            if next_col < 3: next_col = 3 
 
-            # Siapkan list skor vertikal
-            col_data = []
-            for item_text in ordered_items_30:
-                score = master_data.get(item_text, {}).get(score_key, 0)
-                col_data.append([score]) 
+            # Susun skor secara vertikal (kolom data)
+            col_data = [[master_data.get(txt, {}).get(score_key, 0)] for txt in ordered_items_30]
 
-            # Tentukan range alamat (C4:C33, D4:D33, dst)
+            # Tentukan range (Misal: C4:C33, D4:D33, dst)
             col_letter = gspread.utils.rowcol_to_a1(4, next_col)[:-1]
             cell_range = f"{col_letter}4:{col_letter}33"
             
-            # Update data ke GSheets
-            sheet.update(cell_range, col_data)
+            # Update GSheets. RAW menjaga format alignment asli agar tidak rata kiri.
+            sheet.update(cell_range, col_data, value_input_option='RAW')
             
     except Exception as e:
-        # HARD FAIL: Menghentikan eksekusi Streamlit jika terjadi error pada GSheets
-        st.error(f"❌ KRITIKAL: Gagal memperbarui Google Sheets. Data tidak akan dikirim ke Telegram demi menjaga integritas database. Error: {e}")
-        st.stop() # Ini akan menghentikan seluruh proses di bawahnya
+        # Menangani glitch Response 200 (dianggap sukses)
+        if "200" in str(e):
+            return
+        # Hard Fail: Stop proses jika error sungguhan
+        st.error(f"❌ KRITIKAL: Gagal sinkronisasi Google Sheets. Error: {e}")
+        st.info("Proses dihentikan demi menjaga integritas database. Data tidak dikirim ke Telegram.")
+        st.stop()
 
 def kirim_ke_telegram(file_stream, nama_panelis):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
@@ -176,7 +175,8 @@ if st.session_state.step == 0:
     st.title("⚖️ Form Validasi Expert Judgement")
     st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
     st.subheader("📝 PETUNJUK PENGISIAN")
-    st.write("Silakan isi nama dan pekerjaan untuk melanjutkan.")
+    st.info("Mohon dibaca sebelum memberikan penilaian")
+    st.write("Silakan isi nama dan pekerjaan Anda untuk memulai penilaian instrumen.")
     
     st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
@@ -213,7 +213,6 @@ elif st.session_state.step in [1, 2, 3]:
                 st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-    # Validasi error per halaman
     errors = [txt for txt in current_page_items if st.session_state.master_data[txt]["kj"] == 0]
 
     if st.session_state.step == 3:
@@ -235,7 +234,7 @@ elif st.session_state.step == 4:
     if not st.session_state.submitted:
         with st.spinner("Sinkronisasi database GSheets & Word..."):
             try:
-                # 1. Update GSheets (HARD FAIL: Jika ini gagal, st.stop() akan memicu)
+                # 1. Update GSheets (HARD FAIL: Jika gagal, proses di bawahnya berhenti)
                 update_gsheets_scores(st.session_state.master_data, data_aspek)
                 
                 # 2. Proses Word
@@ -278,7 +277,7 @@ elif st.session_state.step == 5:
         <div class='thanks-card'>
             <h1 style='color: #1E3A8A;'>Terima Kasih! ✨</h1>
             <p style='font-size: 1.2rem; color: #475569;'>
-                Data penilaian Anda telah berhasil dicatat di sistem Excel dan dikirimkan ke peneliti. 
+                Data penilaian Anda telah berhasil dicatat di sistem Excel peneliti dan dokumen terkirim via Telegram.
             </p>
             <hr>
             <p style='font-style: italic; color: #64748b;'>Halaman ini dapat Anda tutup sekarang.</p>
