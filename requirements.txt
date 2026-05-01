@@ -2,3 +2,5 @@ streamlit
 python-docx
 requests
 streamlit-scroll-to-top
+st-gsheets-connection
+pandas
