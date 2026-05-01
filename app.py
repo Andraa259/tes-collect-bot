@@ -194,8 +194,10 @@ elif st.session_state.step == 4:
     if not st.session_state.submitted:
         with st.spinner("Mencatat ke Excel, Word, & Mengirim ke Telegram..."):
             try:
-                # 1. KONEKSI KE GSHEETS
+                # 1. KONEKSI KE GSHEETS (Sebutkan URL secara eksplisit di sini)
+                # Pastikan di Secrets kamu sudah ada gsheet_url
                 conn = st.connection("gsheets", type=GSheetsConnection)
+                url_target = st.secrets["gsheet_url"]
 
                 # 2. URUTKAN AITEM (Agar urutan kolom sesuai Aitem 1-36)
                 all_ordered_items = []
@@ -208,23 +210,30 @@ elif st.session_state.step == 4:
                 keys = ["kj", "rel", "kes"]
 
                 for ws_name, k in zip(worksheets, keys):
-                    df_old = conn.read(worksheet=ws_name, ttl=0) 
+                    # Ambil data lama dengan menyebutkan SPREADSHEET-nya
+                    df_old = conn.read(spreadsheet=url_target, worksheet=ws_name, ttl=0) 
                     
+                    # Siapkan baris baru untuk penilai ini
                     new_entry = [st.session_state.p_nama]
                     for item_text in all_ordered_items:
                         new_entry.append(st.session_state.master_data[item_text][k])
                     
+                    # Cari baris kosong pertama (antara baris 3 s/d 32)
                     idx_target = None
                     for i in range(2, 32): 
+                        # Cek kolom B (index 1) apakah kosong
                         if i >= len(df_old) or pd.isna(df_old.iloc[i, 1]) or str(df_old.iloc[i, 1]).strip() == "":
                             idx_target = i
                             break
                     
                     if idx_target is not None:
+                        # Update dataframe secara horizontal
                         for col_idx, value in enumerate(new_entry):
                             if col_idx + 1 < df_old.shape[1]:
                                 df_old.iloc[idx_target, col_idx + 1] = value
-                        conn.update(worksheet=ws_name, data=df_old)
+                        
+                        # Tulis kembali ke GSheets dengan menyebutkan SPREADSHEET-nya
+                        conn.update(spreadsheet=url_target, worksheet=ws_name, data=df_old)
                     else:
                         st.warning(f"Sheet {ws_name} sudah penuh.")
 
