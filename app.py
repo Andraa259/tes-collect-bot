@@ -10,7 +10,7 @@ from streamlit_scroll_to_top import scroll_to_here
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
 
-# Pastikan Anda menaruh file JSON Service Account di st.secrets["gcp_service_account"]
+# Fungsi koneksi GSheets
 def get_gsheets_client():
     scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
@@ -33,6 +33,7 @@ if 'submitted' not in st.session_state:
     st.session_state.submitted = False
 
 # --- LOGIKA SCROLL ---
+# Ditempatkan di awal untuk merespon state perubahan step secepat mungkin
 if st.session_state.scroll_to_top:
     scroll_to_here(0, key=f'scroll_step_{st.session_state.step}') 
     st.session_state.scroll_to_top = False
@@ -41,63 +42,60 @@ def move_step(step_num):
     st.session_state.step = step_num
     st.session_state.scroll_to_top = True
 
-def kirim_ke_telegram(file_stream, nama_panelis):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    files = {'document': (f'Form Validasi Expert Judgement Forgiveness_{nama_panelis}.docx', file_stream)}
-    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Form Expert Judgement Masuk: {nama_panelis}"}
-    return requests.post(url, data=payload, files=files)
-
-# --- FUNGSI UPDATE GSHEETS ---
+# --- FUNGSI UPDATE GSHEETS (HARD FAIL) ---
 def update_gsheets_scores(master_data, data_aspek):
     try:
         client = get_gsheets_client()
-        # Buka file verbatim
+        # Buka file verbatim sesuai permintaan
         spreadsheet = client.open("CVI Aiken Zuyy.xlsx")
         
-        # Mapping skor berdasarkan aspek
         sheets_mapping = {
             "kj": "KEJELASAN",
             "rel": "RELEVANSI",
             "kes": "KESESUAIAN"
         }
 
-        # Urutan item sesuai tampilan UI (penting agar skor tidak tertukar)
+        # Urutan aitem harus tetap (4-33)
         all_ordered_items = []
         for aspek in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
             for _, items in data_aspek[aspek]:
                 all_ordered_items.extend(items)
         
-        # Ambil maksimal 30 item (C4-C33 = 30 baris)
+        # Ambil 30 aitem pertama untuk rentang baris 4-33
         ordered_items_30 = all_ordered_items[:30]
 
         for score_key, sheet_name in sheets_mapping.items():
             sheet = spreadsheet.worksheet(sheet_name)
             
-            # Cari kolom kosong pertama mulai dari kolom C (index 3)
-            # Kita cek baris ke-4 (index 4) untuk menemukan kolom penilai baru
+            # Cek baris ke-4 untuk menentukan kolom kosong berikutnya (mulai dari C/kolom 3)
+            # Kolom A & B tidak boleh diubah
             row_4_values = sheet.row_values(4)
-            # gspread row_values tidak menyertakan sel kosong di akhir, 
-            # jadi kita cari panjangnya dan tambah 1
             next_col = len(row_4_values) + 1
-            if next_col < 3: next_col = 3 # Pastikan minimal kolom C
+            if next_col < 3: next_col = 3 # Start minimal di kolom C
 
-            # Siapkan list skor untuk di-update secara vertikal
+            # Siapkan list skor vertikal
             col_data = []
             for item_text in ordered_items_30:
                 score = master_data.get(item_text, {}).get(score_key, 0)
-                col_data.append([score]) # Format nested list untuk update range vertikal
+                col_data.append([score]) 
 
-            # Tentukan range (Contoh: C4:C33, D4:D33, dst)
+            # Tentukan range alamat (C4:C33, D4:D33, dst)
             col_letter = gspread.utils.rowcol_to_a1(4, next_col)[:-1]
             cell_range = f"{col_letter}4:{col_letter}33"
             
-            # Update secara surgical tanpa menyentuh kolom A dan B
+            # Update data ke GSheets
             sheet.update(cell_range, col_data)
             
-        return True
     except Exception as e:
-        st.error(f"Gagal update GSheets: {e}")
-        return False
+        # HARD FAIL: Menghentikan eksekusi Streamlit jika terjadi error pada GSheets
+        st.error(f"❌ KRITIKAL: Gagal memperbarui Google Sheets. Data tidak akan dikirim ke Telegram demi menjaga integritas database. Error: {e}")
+        st.stop() # Ini akan menghentikan seluruh proses di bawahnya
+
+def kirim_ke_telegram(file_stream, nama_panelis):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
+    files = {'document': (f'Form Validasi Expert Judgement Forgiveness_{nama_panelis}.docx', file_stream)}
+    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Form Expert Judgement Masuk: {nama_panelis}"}
+    return requests.post(url, data=payload, files=files)
 
 # --- UI STYLING ---
 st.set_page_config(page_title="Expert Judgement", layout="centered")
@@ -178,17 +176,7 @@ if st.session_state.step == 0:
     st.title("⚖️ Form Validasi Expert Judgement")
     st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
     st.subheader("📝 PETUNJUK PENGISIAN")
-    st.info("Mohon dibaca sebelum memberikan penilaian")
-    st.write("Sehubungan dengan upaya pengembangan instrumen penelitian mengenai tingkat pemaafan (forgiveness) pada mahasiswa, kami meminta Bapak/Ibu untuk menilai item-item yang telah kami susun, dari aspek :")
-    st.markdown("""
-    * **Kejelasan**: Kejelasan bahasa yang digunakan apakah sudah sesuai, jelas, dan mudah dipahami.
-    * **Relevansi**: Relevansi aitem alat ukur yang disusun apakah sudah menggambarkan variabel.
-    * **Kesesuaian**: Kesesuaian aitem yang disusun sudah sesuai dengan indikatornya.
-    """)
-    st.write("Penilaian dilakukan dengan memberikan angka 1-4. Skor **0** berarti Anda belum memberikan penilaian.")
-    st.markdown("""
-    0 = "Belum Diisi" | 1 = "Kurang" | 2 = "Cukup" | 3 = "Baik" | 4 = "Baik Sekali"
-    """)
+    st.write("Silakan isi nama dan pekerjaan untuk melanjutkan.")
     
     st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
@@ -225,11 +213,8 @@ elif st.session_state.step in [1, 2, 3]:
                 st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-    errors = []
-    for txt in current_page_items:
-        d = st.session_state.master_data[txt]
-        if d["kj"] == 0 or d["rel"] == 0 or d["kes"] == 0:
-            errors.append(txt)
+    # Validasi error per halaman
+    errors = [txt for txt in current_page_items if st.session_state.master_data[txt]["kj"] == 0]
 
     if st.session_state.step == 3:
         st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:", value=st.session_state.saran_global)
@@ -241,26 +226,24 @@ elif st.session_state.step in [1, 2, 3]:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
             if False:
-                st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini. Mohon lengkapi semua skor (tidak boleh 0) sebelum lanjut.")
+                st.error("⚠️ Mohon lengkapi semua skor (tidak boleh 0) sebelum lanjut.")
             else:
                 move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
 elif st.session_state.step == 4:
     st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Menyalin data ke GSheets & Word..."):
+        with st.spinner("Sinkronisasi database GSheets & Word..."):
             try:
-                # 1. Update ke Google Sheets Terlebih Dahulu
+                # 1. Update GSheets (HARD FAIL: Jika ini gagal, st.stop() akan memicu)
                 update_gsheets_scores(st.session_state.master_data, data_aspek)
                 
-                # 2. Proses Dokumen Word
+                # 2. Proses Word
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
-                # 1. Identitas
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                     if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
                 
-                # 2. Tabel Mapping
                 table = doc.tables[0]
                 for row in table.rows:
                     aitem_word = "".join(row.cells[2].text.split()).lower()
@@ -272,7 +255,6 @@ elif st.session_state.step == 4:
                             row.cells[5].text = str(data["kes"])
                             row.cells[6].text = str(data["ket"])
                 
-                # 3. Saran Akhir
                 for row in table.rows:
                     if "Catatan" in row.cells[2].text:
                         row.cells[2].text += "\n" + st.session_state.saran_global
@@ -296,8 +278,7 @@ elif st.session_state.step == 5:
         <div class='thanks-card'>
             <h1 style='color: #1E3A8A;'>Terima Kasih! ✨</h1>
             <p style='font-size: 1.2rem; color: #475569;'>
-                Data penilaian Anda telah berhasil kami terima dan dikirimkan ke peneliti. 
-                Kontribusi Anda sangat berharga bagi pengembangan instrumen penelitian ini.
+                Data penilaian Anda telah berhasil dicatat di sistem Excel dan dikirimkan ke peneliti. 
             </p>
             <hr>
             <p style='font-style: italic; color: #64748b;'>Halaman ini dapat Anda tutup sekarang.</p>
