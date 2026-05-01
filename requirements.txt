@@ -1,6 +1,8 @@
 streamlit
+pandas
 python-docx
 requests
+gspread
+google-auth
 streamlit-scroll-to-top
-st-gsheets-connection
-pandas
+openpyxl
