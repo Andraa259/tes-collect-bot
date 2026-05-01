@@ -4,12 +4,12 @@ import requests
 import io
 from docx import Document
 from streamlit_scroll_to_top import scroll_to_here
-from streamlit_gsheets import GSheetsConnection
+from streamlit_gsheets import GSheetsConnection  # Tambahan library gsheets
 
 # --- KREDENSIAL ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
-GSHEET_URL = st.secrets["gsheet_url"]
+GSHEET_URL = st.secrets["gsheet_url"]  # Pastikan URL Sheets ada di secrets
 
 # --- INITIALIZING SESSION STATE ---
 if 'step' not in st.session_state:
@@ -38,8 +38,8 @@ def move_step(step_num):
 
 def kirim_ke_telegram(file_stream, nama_panelis):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    files = {'document': (f'Form Validasi_{nama_panelis}.docx', file_stream)}
-    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Expert Judgement Masuk: {nama_panelis}"}
+    files = {'document': (f'Form Validasi Expert Judgement Forgiveness_{nama_panelis}.docx', file_stream)}
+    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Form Expert Judgement Masuk: {nama_panelis}"}
     return requests.post(url, data=payload, files=files)
 
 # --- UI STYLING ---
@@ -121,11 +121,16 @@ if st.session_state.step == 0:
     st.title("⚖️ Form Validasi Expert Judgement")
     st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
     st.subheader("📝 PETUNJUK PENGISIAN")
+    st.info("Mohon dibaca sebelum memberikan penilaian")
+    st.write("Sehubungan dengan upaya pengembangan instrumen penelitian mengenai tingkat pemaafan (forgiveness) pada mahasiswa, kami meminta Bapak/Ibu untuk menilai item-item yang telah kami susun, dari aspek :")
     st.markdown("""
-    * **Kejelasan**: Bahasa mudah dipahami.
-    * **Relevansi**: Aitem menggambarkan variabel.
-    * **Kesesuaian**: Aitem sesuai indikator.
-    * Skor **1-4** (1: Kurang, 4: Baik Sekali). Skor **0** berarti belum diisi.
+    * **Kejelasan**: Kejelasan bahasa yang digunakan apakah sudah sesuai, jelas, dan mudah dipahami.
+    * **Relevansi**: Relevansi aitem alat ukur yang disusun apakah sudah menggambarkan variabel.
+    * **Kesesuaian**: Kesesuaian aitem yang disusun sudah sesuai dengan indikatornya.
+    """)
+    st.write("Penilaian dilakukan dengan memberikan angka 1-4. Skor **0** berarti Anda belum memberikan penilaian.")
+    st.markdown("""
+    0 = "Belum Diisi" | 1 = "Kurang" | 2 = "Cukup" | 3 = "Baik" | 4 = "Baik Sekali"
     """)
     
     st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
@@ -142,7 +147,8 @@ elif st.session_state.step in [1, 2, 3]:
     st.subheader(f"Aspek: {aspek_aktif}")
 
     current_page_items = []
-    for _, items in data_aspek[aspek_aktif]: current_page_items.extend(items)
+    for _, items in data_aspek[aspek_aktif]:
+        current_page_items.extend(items)
 
     for ind_name, items in data_aspek[aspek_aktif]:
         st.markdown(f"<div class='indicator-header'>{ind_name}</div>", unsafe_allow_html=True)
@@ -154,16 +160,22 @@ elif st.session_state.step in [1, 2, 3]:
                 st.markdown("<div class='white-card'>", unsafe_allow_html=True)
                 st.write(f"**{txt}**")
                 c1, c2, c3 = st.columns(3)
+                
                 with c1: st.session_state.master_data[txt]["kj"] = st.selectbox("Kejelasan", [0,1,2,3,4], index=st.session_state.master_data[txt]["kj"], key=f"kj_{txt}")
                 with c2: st.session_state.master_data[txt]["rel"] = st.selectbox("Relevansi", [0,1,2,3,4], index=st.session_state.master_data[txt]["rel"], key=f"rel_{txt}")
                 with c3: st.session_state.master_data[txt]["kes"] = st.selectbox("Kesesuaian", [0,1,2,3,4], index=st.session_state.master_data[txt]["kes"], key=f"kes_{txt}")
-                st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
+                
+                st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-    errors = [t for t in current_page_items if any(st.session_state.master_data[t][k] == 0 for k in ["kj", "rel", "kes"])]
+    errors = []
+    for txt in current_page_items:
+        d = st.session_state.master_data[txt]
+        if d["kj"] == 0 or d["rel"] == 0 or d["kes"] == 0:
+            errors.append(txt)
 
     if st.session_state.step == 3:
-        st.session_state.saran_global = st.text_area("Saran Keseluruhan:", value=st.session_state.saran_global)
+        st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:", value=st.session_state.saran_global)
 
     nav1, nav2 = st.columns(2)
     with nav1:
@@ -171,15 +183,17 @@ elif st.session_state.step in [1, 2, 3]:
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
-            if False: st.error(f"⚠️ Lengkapi {len(errors)} aitem di halaman ini (skor tidak boleh 0).")
-            else: move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
+            if False:
+                st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini. Mohon lengkapi semua skor (tidak boleh 0) sebelum lanjut.")
+            else:
+                move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
 elif st.session_state.step == 4:
     st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Mencatat data ke Excel, Word, & Telegram..."):
+        with st.spinner("Mencatat ke GSheets, Word & Mengirim Dokumen..."):
             try:
-                # --- 1. KONEKSI GSHEETS ---
+                # --- A. LOGIKA GOOGLE SHEETS (Hanya Skor) ---
                 conn = st.connection("gsheets", type=GSheetsConnection)
                 all_ordered_items = []
                 for aspect in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
@@ -191,33 +205,37 @@ elif st.session_state.step == 4:
                 for ws_name, k in zip(worksheets, keys):
                     df_old = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0)
                     
-                    # Skor murni (Aitem 1-36) sebagai list integer
-                    new_entry_scores = [int(st.session_state.master_data[txt][k]) for txt in all_ordered_items]
+                    # Proteksi Kolom A (Jika Pandas tidak membaca kolom kosong A, kita masukkan Margin)
+                    if df_old.shape[1] < 37: 
+                        df_old.insert(0, "Margin", "")
                     
-                    # Logika Cari Baris Kosong (Cek Kolom B / Index 1)
+                    # Siapkan list skor integer
+                    new_scores = [int(st.session_state.master_data[txt][k]) for txt in all_ordered_items]
+                    
+                    # Cari baris kosong mulai dari Kolom B (Index 1)
                     idx_target = None
-                    for i in range(2, 50): # Cek dari baris 3 ke bawah
+                    for i in range(2, 50):
                         if i >= len(df_old):
                             idx_target = i; break
                         val_check = str(df_old.iloc[i, 1]).strip().lower()
-                        if val_check in ["", "nan", "0", "0.0", "none"]:
+                        if val_check in ["", "nan", "0", "0.0"]:
                             idx_target = i; break
                     
                     if idx_target is not None:
                         while idx_target >= len(df_old):
                             df_old = pd.concat([df_old, pd.DataFrame([[""] * df_old.shape[1]], columns=df_old.columns)], ignore_index=True)
                         
-                        # ISI SKOR MULAI KOLOM B (INDEX 1). KOLOM A (INDEX 0) DILEWATI.
-                        for col_offset, val in enumerate(new_entry_scores):
-                            target_col = col_offset + 1 
+                        # Isi skor mulai dari Kolom B (Index 1)
+                        for col_offset, val in enumerate(new_scores):
+                            target_col = col_offset + 1
                             if target_col < df_old.shape[1]:
                                 df_old.iloc[idx_target, target_col] = val
                         
+                        # Pastikan Kolom A tetap kosong/margin
+                        df_old.iloc[:, 0] = ""
                         conn.update(spreadsheet=GSHEET_URL, worksheet=ws_name, data=df_old.fillna(""))
-                    else:
-                        st.warning(f"Sheet {ws_name} penuh.")
 
-                # --- 2. PROSES WORD ---
+                # --- B. LOGIKA WORD (Seperti Kode Awalmu) ---
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
@@ -227,27 +245,43 @@ elif st.session_state.step == 4:
                 for row in table.rows:
                     aitem_word = "".join(row.cells[2].text.split()).lower()
                     for txt_ori, data in st.session_state.master_data.items():
-                        if "".join(txt_ori.split()).lower()[:50] in aitem_word:
-                            row.cells[3].text, row.cells[4].text = str(data["kj"]), str(data["rel"])
-                            row.cells[5].text, row.cells[6].text = str(data["kes"]), str(data["ket"])
+                        txt_normalized = "".join(txt_ori.split()).lower()
+                        if txt_normalized[:60] in aitem_word:
+                            row.cells[3].text = str(data["kj"])
+                            row.cells[4].text = str(data["rel"])
+                            row.cells[5].text = str(data["kes"])
+                            row.cells[6].text = str(data["ket"])
                 
                 for row in table.rows:
-                    if "Catatan" in row.cells[2].text: row.cells[2].text += f"\n{st.session_state.saran_global}"
+                    if "Catatan" in row.cells[2].text:
+                        row.cells[2].text += "\n" + st.session_state.saran_global
 
                 buf = io.BytesIO()
                 doc.save(buf)
                 buf.seek(0)
-
-                # --- 3. TELEGRAM ---
+                
+                # --- C. TELEGRAM ---
                 kirim_ke_telegram(buf, st.session_state.p_nama)
-
+                
                 st.session_state.submitted = True
                 move_step(5); st.rerun()
-
+                
             except Exception as e:
                 st.error(f"Terjadi kesalahan teknis: {e}")
                 if st.button("Coba Lagi"): st.rerun()
+    else:
+        move_step(5); st.rerun()
 
 elif st.session_state.step == 5:
     st.balloons()
-    st.markdown("<div class='thanks-card'><h1>Terima Kasih! ✨</h1><p>Data Anda telah berhasil terkirim.</p></div>", unsafe_allow_html=True)
+    st.markdown("""
+        <div class='thanks-card'>
+            <h1 style='color: #1E3A8A;'>Terima Kasih! ✨</h1>
+            <p style='font-size: 1.2rem; color: #475569;'>
+                Data penilaian Anda telah berhasil kami terima dan dikirimkan ke peneliti. 
+                Kontribusi Anda sangat berharga bagi pengembangan instrumen penelitian ini.
+            </p>
+            <hr>
+            <p style='font-style: italic; color: #64748b;'>Halaman ini dapat Anda tutup sekarang.</p>
+        </div>
+    """, unsafe_allow_html=True)
