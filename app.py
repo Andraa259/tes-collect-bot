@@ -1,13 +1,13 @@
 import streamlit as st
+import pandas as pd
 from docx import Document
 import requests
 import io
-import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_scroll_to_top import scroll_to_here
 
-# --- KREDENSIAL ---
+# --- KREDENSIAL & KONFIGURASI ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
 GSHEET_URL = st.secrets["GSHEET_URL"]
@@ -37,22 +37,19 @@ def move_step(step_num):
     st.session_state.step = step_num
     st.session_state.scroll_to_top = True
 
-def kirim_ke_telegram(file_stream, nama_panelis):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    files = {'document': (f'Form Validasi Expert Judgement Forgiveness_{nama_panelis}.docx', file_stream)}
-    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Form Expert Judgement Masuk: {nama_panelis}"}
-    return requests.post(url, data=payload, files=files)
-
-# --- FUNGSI TAMBAHAN: UPDATE GOOGLE SHEETS VIA URL ---
+# --- FUNGSI UPDATE GOOGLE SHEETS (HARD FAIL) ---
 def update_google_sheets(master_data, p_nama):
     try:
+        # 1. Authorize
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
         client = gspread.authorize(creds)
         
-        # MENGGUNAKAN URL UNTUK MEMBUKA SHEET
+        # 2. Buka spreadsheet via URL
+        # Nama file referensi: CVI Aiken Zuyy.xlsx
         spreadsheet = client.open_by_url(GSHEET_URL)
         
+        # Mapping skor ke masing-masing sheet
         aspek_map = {
             "kj": "KEJELASAN",
             "rel": "RELEVANSI",
@@ -63,20 +60,36 @@ def update_google_sheets(master_data, p_nama):
             ws = spreadsheet.worksheet(sheet_name)
             data_all = ws.get_all_values()
             
+            # Cari baris penilai (asumsi nama ada di kolom B / indeks 1)
             row_idx = -1
             for i, row in enumerate(data_all):
-                # Mencari nama di kolom B (indeks 1)
                 if p_nama.lower() in row[1].lower():
                     row_idx = i + 1
                     break
             
             if row_idx != -1:
+                # Susun skor secara horizontal sesuai urutan aitem
                 scores = [[data[key_skor] for data in master_data.values()]]
-                # Mulai update dari Kolom D (kolom ke-4)
+                # Update mulai dari Kolom D (kolom ke-4)
                 start_cell = gspread.utils.rowcol_to_a1(row_idx, 4)
                 ws.update(start_cell, scores)
+            else:
+                # Jika nama tidak ditemukan di salah satu sheet, hentikan proses
+                st.error(f"❌ Nama '{p_nama}' tidak ditemukan di sheet {sheet_name}!")
+                st.info("Pastikan nama Anda sudah terdaftar di file CVI Aiken Zuyy.xlsx sebelum mengisi form.")
+                st.stop()
+
     except Exception as e:
-        st.warning(f"Koneksi GSheets gagal: {e}")
+        # Jika koneksi gagal, paksa berhenti agar data tetap integritas
+        st.error(f"⚠️ KONEKSI GOOGLE SHEETS GAGAL: {e}")
+        st.info("Proses dihentikan secara otomatis. Data tidak dikirim ke Telegram.")
+        st.stop()
+
+def kirim_ke_telegram(file_stream, nama_panelis):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
+    files = {'document': (f'Form Validasi Expert Judgement Forgiveness_{nama_panelis}.docx', file_stream)}
+    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data Form Expert Judgement Masuk: {nama_panelis}"}
+    return requests.post(url, data=payload, files=files)
 
 # --- UI STYLING ---
 st.set_page_config(page_title="Expert Judgement", layout="centered")
@@ -195,7 +208,11 @@ elif st.session_state.step in [1, 2, 3]:
                 st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-    errors = [txt for txt in current_page_items if st.session_state.master_data[txt]["kj"] == 0]
+    errors = []
+    for txt in current_page_items:
+        d = st.session_state.master_data[txt]
+        if d["kj"] == 0 or d["rel"] == 0 or d["kes"] == 0:
+            errors.append(txt)
 
     if st.session_state.step == 3:
         st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:", value=st.session_state.saran_global)
@@ -206,20 +223,20 @@ elif st.session_state.step in [1, 2, 3]:
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
-            if False:
-                st.error("⚠️ Mohon lengkapi semua skor (tidak boleh 0) sebelum lanjut.")
+            if errors:
+                st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
             else:
                 move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
 elif st.session_state.step == 4:
     st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Mengirim data ke Word & Google Sheets..."):
+        with st.spinner("Sinkronisasi Data ke Google Sheets & Mengirim Dokumen..."):
             try:
-                # 1. Update ke Google Sheets
+                # 1. Update Google Sheets Terlebih Dahulu (HARD FAIL)
                 update_google_sheets(st.session_state.master_data, st.session_state.p_nama)
 
-                # 2. Proses Word
+                # 2. Jika GSheets Berhasil, Baru Lanjut ke Word
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
@@ -248,8 +265,10 @@ elif st.session_state.step == 4:
                 st.session_state.submitted = True
                 move_step(5); st.rerun()
             except Exception as e:
-                st.error(f"Terjadi kesalahan: {e}")
-                if st.button("Ulangi"): move_step(3); st.rerun()
+                st.error(f"Terjadi kesalahan teknis: {e}")
+                if st.button("Kembali ke Penilaian"): move_step(3); st.rerun()
+    else:
+        move_step(5); st.rerun()
 
 elif st.session_state.step == 5:
     st.balloons()
@@ -257,7 +276,9 @@ elif st.session_state.step == 5:
         <div class='thanks-card'>
             <h1 style='color: #1E3A8A;'>Terima Kasih! ✨</h1>
             <p style='font-size: 1.2rem; color: #475569;'>
-                Data telah terkirim. Kontribusi Anda sangat berharga bagi riset ini.
+                Data penilaian Anda telah berhasil dicatat di Excel dan dikirimkan ke peneliti.
             </p>
+            <hr>
+            <p style='font-style: italic; color: #64748b;'>Halaman ini dapat Anda tutup sekarang.</p>
         </div>
     """, unsafe_allow_html=True)
