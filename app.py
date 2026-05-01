@@ -1,15 +1,15 @@
 import streamlit as st
-import pandas as pd
+from docx import Document
 import requests
 import io
-from docx import Document
 from streamlit_scroll_to_top import scroll_to_here
-from streamlit_gsheets import GSheetsConnection  # Tambahan library gsheets
+import pandas as pd
+from streamlit_gsheets import GSheetsConnection # Tambahan import untuk koneksi
 
 # --- KREDENSIAL ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
-GSHEET_URL = st.secrets["gsheet_url"]  # Pastikan URL Sheets ada di secrets
+GSHEET_URL = st.secrets["gsheet_url"] # Pastikan gsheet_url ada di secrets
 
 # --- INITIALIZING SESSION STATE ---
 if 'step' not in st.session_state:
@@ -183,7 +183,7 @@ elif st.session_state.step in [1, 2, 3]:
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
-            if False:
+            if errors:
                 st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini. Mohon lengkapi semua skor (tidak boleh 0) sebelum lanjut.")
             else:
                 move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
@@ -191,56 +191,56 @@ elif st.session_state.step in [1, 2, 3]:
 elif st.session_state.step == 4:
     st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Mencatat ke GSheets, Word & Mengirim Dokumen..."):
+        with st.spinner("Mencatat ke Google Sheets, Word & Mengirim Dokumen..."):
             try:
-                # --- A. LOGIKA GOOGLE SHEETS (Hanya Skor) ---
+                # --- TAMBAHAN: LOGIKA GSHEETS (Mulai dari sini) ---
                 conn = st.connection("gsheets", type=GSheetsConnection)
+                
+                # Urutkan semua 36 aitem agar konsisten
                 all_ordered_items = []
-                for aspect in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
-                    for _, items in data_aspek[aspect]: all_ordered_items.extend(items)
+                for asp in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
+                    for _, items in data_aspek[asp]:
+                        all_ordered_items.extend(items)
 
                 worksheets = ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]
                 keys = ["kj", "rel", "kes"]
 
                 for ws_name, k in zip(worksheets, keys):
+                    # Baca data lama
                     df_old = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0)
                     
-                    # Proteksi Kolom A (Jika Pandas tidak membaca kolom kosong A, kita masukkan Margin)
-                    if df_old.shape[1] < 37: 
-                        df_old.insert(0, "Margin", "")
-                    
-                    # Siapkan list skor integer
-                    new_scores = [int(st.session_state.master_data[txt][k]) for txt in all_ordered_items]
-                    
-                    # Cari baris kosong mulai dari Kolom B (Index 1)
+                    # Cari baris kosong pertama di rentang Excel baris 4 s/d 33 (Index Pandas 2 s/d 31)
                     idx_target = None
-                    for i in range(2, 50):
-                        if i >= len(df_old):
-                            idx_target = i; break
-                        val_check = str(df_old.iloc[i, 1]).strip().lower()
-                        if val_check in ["", "nan", "0", "0.0"]:
-                            idx_target = i; break
+                    for i in range(2, 32): 
+                        # Cek kolom C (Index 2) apakah kosong
+                        if i >= len(df_old) or str(df_old.iloc[i, 2]).strip() in ["", "nan", "0"]:
+                            idx_target = i
+                            break
                     
                     if idx_target is not None:
+                        # Jika baris belum ada di dataframe, buat baris baru
                         while idx_target >= len(df_old):
                             df_old = pd.concat([df_old, pd.DataFrame([[""] * df_old.shape[1]], columns=df_old.columns)], ignore_index=True)
                         
-                        # Isi skor mulai dari Kolom B (Index 1)
-                        for col_offset, val in enumerate(new_scores):
-                            target_col = col_offset + 1
-                            if target_col < df_old.shape[1]:
-                                df_old.iloc[idx_target, target_col] = val
+                        # Isi data Horizontal mulai dari Kolom C (Index 2)
+                        for col_offset, item_txt in enumerate(all_ordered_items):
+                            col_index = col_offset + 2 # Mulai dari kolom C
+                            val = st.session_state.master_data[item_txt][k]
+                            if col_index < df_old.shape[1]:
+                                df_old.iloc[idx_target, col_index] = val
                         
-                        # Pastikan Kolom A tetap kosong/margin
-                        df_old.iloc[:, 0] = ""
+                        # Update Google Sheets
                         conn.update(spreadsheet=GSHEET_URL, worksheet=ws_name, data=df_old.fillna(""))
+                # --- AKHIR LOGIKA GSHEETS ---
 
-                # --- B. LOGIKA WORD (Seperti Kode Awalmu) ---
+                # (KODE ASLI KAMU LANJUT DI SINI)
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
+                # 1. Identitas
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                     if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
                 
+                # 2. Tabel Mapping
                 table = doc.tables[0]
                 for row in table.rows:
                     aitem_word = "".join(row.cells[2].text.split()).lower()
@@ -252,6 +252,7 @@ elif st.session_state.step == 4:
                             row.cells[5].text = str(data["kes"])
                             row.cells[6].text = str(data["ket"])
                 
+                # 3. Saran Akhir
                 for row in table.rows:
                     if "Catatan" in row.cells[2].text:
                         row.cells[2].text += "\n" + st.session_state.saran_global
@@ -259,16 +260,13 @@ elif st.session_state.step == 4:
                 buf = io.BytesIO()
                 doc.save(buf)
                 buf.seek(0)
-                
-                # --- C. TELEGRAM ---
                 kirim_ke_telegram(buf, st.session_state.p_nama)
                 
                 st.session_state.submitted = True
                 move_step(5); st.rerun()
-                
             except Exception as e:
                 st.error(f"Terjadi kesalahan teknis: {e}")
-                if st.button("Coba Lagi"): st.rerun()
+                if st.button("Kembali ke Penilaian"): move_step(3); st.rerun()
     else:
         move_step(5); st.rerun()
 
