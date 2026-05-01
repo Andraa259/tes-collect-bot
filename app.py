@@ -193,60 +193,57 @@ elif st.session_state.step == 4:
     if not st.session_state.submitted:
         with st.spinner("Mencatat ke Excel, Word, & Mengirim ke Telegram..."):
             try:
-                # 1. KONEKSI KE GSHEETS (Via URL di Secrets)
+                # 1. KONEKSI KE GSHEETS
                 conn = st.connection("gsheets", type=GSheetsConnection)
 
-                # 2. PREPARASI DATA SKOR (Urutan Aitem 1-36)
+                # 2. URUTKAN AITEM (Agar urutan kolom C, D, E... sesuai dengan Aitem 1, 2, 3...)
                 all_ordered_items = []
                 for aspect in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
                     for ind_name, items in data_aspek[aspect]:
                         all_ordered_items.extend(items)
-                
-                # Buat baris data baru: [Nama, Skor1, Skor2, ..., Skor36]
-                new_row_data = [st.session_state.p_nama]
-                for item_text in all_ordered_items:
-                    score = st.session_state.master_data.get(item_text, {"kj":0}) # Default ambil salah satu kriteria
-                    # Karena kita butuh 3 kriteria, kita akan proses per sheet nanti
-                    pass
 
                 # --- PROSES UPDATE 3 SHEET DI GSHEETS ---
                 worksheets = ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]
                 keys = ["kj", "rel", "kes"]
 
-                for ws_name, k dalam zip(worksheets, keys):
-                    # Ambil data lama dari GSheet
+                # Loop untuk mengisi masing-masing sheet secara horizontal
+                for ws_name, k in zip(worksheets, keys): # Tadi typo 'dalam', sekarang sudah 'in'
+                    # Ambil data lama
                     df_old = conn.read(worksheet=ws_name, ttl=0) 
                     
-                    # Buat baris baru untuk penilai ini
+                    # Siapkan baris baru: [Nama, Skor1, Skor2, ... Skor36]
                     new_entry = [st.session_state.p_nama]
                     for item_text in all_ordered_items:
                         new_entry.append(st.session_state.master_data[item_text][k])
                     
-                    # Cari baris kosong pertama (antara baris 3 s/d 32)
-                    # Kita asumsikan Kolom B (Index 1) adalah Nama Penilai
-                    # Jika nama masih kosong di baris tersebut, kita isi
+                    # Cari baris kosong antara baris 3 s/d 32
                     idx_target = None
-                    for i in range(2, 32): # Baris 3 sampai 32
-                        if i >= len(df_old) or pd.isna(df_old.iloc[i, 1]) or df_old.iloc[i, 1] == "":
+                    for i in range(2, 32): # Indeks 2 adalah baris 3
+                        # Cek apakah sel nama di Kolom B (index 1) kosong
+                        if i >= len(df_old) or pd.isna(df_old.iloc[i, 1]) or str(df_old.iloc[i, 1]).strip() == "":
                             idx_target = i
                             break
                     
                     if idx_target is not None:
-                        # Update dataframe pada posisi tersebut
-                        # Sesuaikan kolom (B adalah index 1, C dst adalah index 2 ke atas)
+                        # Masukkan data secara horizontal mulai dari Kolom B (index 1)
                         for col_idx, value in enumerate(new_entry):
-                            df_old.iloc[idx_target, col_idx + 1] = value
+                            # Pastikan dataframe cukup besar untuk menampung kolom
+                            if col_idx + 1 < df_old.shape[1]:
+                                df_old.iloc[idx_target, col_idx + 1] = value
                         
-                        # Tulis kembali ke GSheets
+                        # Kirim update ke GSheets
                         conn.update(worksheet=ws_name, data=df_old)
+                    else:
+                        st.warning(f"Sheet {ws_name} sudah penuh (maksimal 30 panelis).")
 
-                # --- 3. PROSES FILE WORD (Fitur Lama) ---
+                # --- 3. PROSES FILE WORD ---
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
-                # (Bagian edit identitas & tabel Word sama seperti kode sebelumnya)
+                # Identitas
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                     if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
                 
+                # Tabel
                 table = doc.tables[0]
                 for row in table.rows:
                     aitem_word = "".join(row.cells[2].text.split()).lower()
@@ -271,7 +268,7 @@ elif st.session_state.step == 4:
                 st.rerun()
 
             except Exception as e:
-                st.error(f"Terjadi kesalahan: {e}")
+                st.error(f"Terjadi kesalahan teknis: {e}")
                 if st.button("Coba Lagi"): st.rerun()
 
     else:
