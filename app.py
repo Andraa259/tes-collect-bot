@@ -1,14 +1,15 @@
 import streamlit as st
-from docx import Document
+import pandas as pd
 import requests
 import io
-import pandas as pd  # <-- Tambahan penting agar pd.isna() berfungsi
+from docx import Document
 from streamlit_scroll_to_top import scroll_to_here
 from streamlit_gsheets import GSheetsConnection
 
-# --- KREDENSIAL TELEGRAM ---
+# --- KREDENSIAL ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
+GSHEET_URL = st.secrets["gsheet_url"]
 
 # --- INITIALIZING SESSION STATE ---
 if 'step' not in st.session_state:
@@ -70,7 +71,7 @@ data_aspek = {
         ("Indikator 2: Kesediaan untuk melepaskan pikiran negatif tentang diri", [
             "Pikiran negatif tentang diri sendiri mulai memudar seiring waktu. (Favorable)",
             "Saya dapat memahami diri sendiri atas kesalahan yang telah saya lakukan. (Favorable)",
-            "Saat  ingatan yang mengganggu tentang diri sendiri muncul, saya mampu melepaskannya. (Favorable)",
+            "Saat ingatan yang mengganggu tentang diri sendiri muncul, saya mampu melepaskannya. (Favorable)",
             "Sulit bagi saya untuk berhenti memikirkan hal-hal buruk yang pernah menimpa diri sendiri. (Unfavorable)",
             "Pikiran tentang kesalahan diri sendiri terus muncul walaupun sudah berusaha melupakannya. (Unfavorable)",
             "Saya sering susah berkonsentrasi karena teringat pada kesalahan diri sendiri yang telah lalu. (Unfavorable)"
@@ -194,10 +195,8 @@ elif st.session_state.step == 4:
     if not st.session_state.submitted:
         with st.spinner("Mencatat ke Excel, Word, & Mengirim ke Telegram..."):
             try:
-                # 1. KONEKSI KE GSHEETS (Sebutkan URL secara eksplisit di sini)
-                # Pastikan di Secrets kamu sudah ada gsheet_url
+                # 1. KONEKSI KE GSHEETS
                 conn = st.connection("gsheets", type=GSheetsConnection)
-                url_target = st.secrets["gsheet_url"]
 
                 # 2. URUTKAN AITEM (Agar urutan kolom sesuai Aitem 1-36)
                 all_ordered_items = []
@@ -210,32 +209,36 @@ elif st.session_state.step == 4:
                 keys = ["kj", "rel", "kes"]
 
                 for ws_name, k in zip(worksheets, keys):
-                    # Ambil data lama dengan menyebutkan SPREADSHEET-nya
-                    df_old = conn.read(spreadsheet=url_target, worksheet=ws_name, ttl=0) 
+                    # Ambil data lama
+                    df_old = conn.read(spreadsheet=GSHEET_URL, worksheet=ws_name, ttl=0) 
+                    df_old = df_old.fillna("") # Bersihkan NaN agar tidak error 400
                     
-                    # Siapkan baris baru untuk penilai ini
+                    # Siapkan baris data baru untuk penilai ini (Horizontal)
                     new_entry = [st.session_state.p_nama]
                     for item_text in all_ordered_items:
                         new_entry.append(st.session_state.master_data[item_text][k])
                     
-                    # Cari baris kosong pertama (antara baris 3 s/d 32)
+                    # Cari baris kosong pertama di Kolom B (Index 1) antara baris 3 s/d 32
                     idx_target = None
                     for i in range(2, 32): 
-                        # Cek kolom B (index 1) apakah kosong
-                        if i >= len(df_old) or pd.isna(df_old.iloc[i, 1]) or str(df_old.iloc[i, 1]).strip() == "":
+                        if i >= len(df_old) or str(df_old.iloc[i, 1]).strip() == "":
                             idx_target = i
                             break
                     
                     if idx_target is not None:
-                        # Update dataframe secara horizontal
+                        # Jika index melampaui df saat ini, tambah baris kosong
+                        while idx_target >= len(df_old):
+                            df_old = pd.concat([df_old, pd.DataFrame([[""] * df_old.shape[1]], columns=df_old.columns)], ignore_index=True)
+                            
+                        # Update data horizontal mulai dari Kolom B (index 1)
                         for col_idx, value in enumerate(new_entry):
                             if col_idx + 1 < df_old.shape[1]:
                                 df_old.iloc[idx_target, col_idx + 1] = value
                         
-                        # Tulis kembali ke GSheets dengan menyebutkan SPREADSHEET-nya
-                        conn.update(spreadsheet=url_target, worksheet=ws_name, data=df_old)
+                        # Kirim kembali ke GSheets
+                        conn.update(spreadsheet=GSHEET_URL, worksheet=ws_name, data=df_old)
                     else:
-                        st.warning(f"Sheet {ws_name} sudah penuh.")
+                        st.warning(f"Sheet {ws_name} sudah penuh (Maksimal 30 penilai).")
 
                 # --- 3. PROSES FILE WORD ---
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
@@ -254,6 +257,11 @@ elif st.session_state.step == 4:
                             row.cells[5].text = str(data["kes"])
                             row.cells[6].text = str(data["ket"])
 
+                # Saran Akhir di Word
+                for row in table.rows:
+                    if "Catatan" in row.cells[2].text:
+                        row.cells[2].text += "\n" + st.session_state.saran_global
+
                 buf = io.BytesIO()
                 doc.save(buf)
                 buf.seek(0)
@@ -261,6 +269,7 @@ elif st.session_state.step == 4:
                 # --- 4. KIRIM KE TELEGRAM ---
                 kirim_ke_telegram(buf, st.session_state.p_nama)
 
+                # SELESAI
                 st.session_state.submitted = True
                 move_step(5)
                 st.rerun()
