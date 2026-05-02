@@ -4,64 +4,50 @@ from docx.shared import Cm
 from datetime import datetime
 import io
 
-# Fungsi untuk konversi nama bulan ke Bahasa Indonesia
 def get_indo_date():
-    months = {
-        1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 
-        5: "Mei", 6: "Juni", 7: "Juli", 8: "Agustus", 
-        9: "September", 10: "Oktober", 11: "November", 12: "Desember"
-    }
+    months = {1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni", 
+              7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"}
     now = datetime.now()
     return f"{now.day} {months[now.month]} {now.year}"
 
-st.title("Auto-Sign & Fill Form")
-st.write("Aplikasi ini akan mengisi tanggal, nama, dan TTD pada file 'Form Validasi Expert Judgement'.")
+def process_text_replacement(paragraph, expert_name, img_file, ttd_width):
+    # 1. Ganti Tanggal (Cari kata Surabaya saja agar lebih fleksibel)
+    if "Surabaya," in paragraph.text:
+        # Menghapus garis bawah dan mengganti dengan tanggal baru
+        # Kita pakai split untuk menjaga kata 'Surabaya,' tetap ada
+        paragraph.text = f"Surabaya, {get_indo_date()}"
 
-# 1. Input Section
-uploaded_file = st.file_uploader("Upload File Word (Form Validasi)", type=["docx"])
-img_file = st.file_uploader("Upload Foto TTD Online", type=["png", "jpg", "jpeg"])
-expert_name = st.text_input("Masukkan Nama Expert (untuk mengganti (Tt Expert Judgement))")
+    # 2. Ganti TTD dan Nama
+    if "(Tt Expert Judgement)" in paragraph.text:
+        paragraph.text = "" # Hapus teks aslinya
+        run = paragraph.add_run()
+        run.add_picture(img_file, width=ttd_width) # Masukkan foto TTD
+        run.add_break() 
+        run.add_text(f"({expert_name})") # Masukkan Nama
 
-# Konfigurasi Ukuran TTD (Terkunci/Statis)
-TTD_WIDTH = Cm(4.5)  # Anda bisa ubah ukuran ini sesuai kebutuhan
+st.title("Auto-Sign Fixer")
 
-if st.button("Proses Dokumen"):
+uploaded_file = st.file_uploader("Upload Word", type=["docx"])
+img_file = st.file_uploader("Upload TTD", type=["png", "jpg"])
+expert_name = st.text_input("Nama Expert")
+
+if st.button("Proses Sekarang"):
     if uploaded_file and img_file and expert_name:
         doc = Document(uploaded_file)
-        today_date = get_indo_date()
-        
-        # 2. Proses Pencarian dan Penggantian
-        for paragraph in doc.paragraphs:
-            # Ganti Tanggal
-            if "Surabaya, ___________________" in paragraph.text:
-                paragraph.text = paragraph.text.replace("Surabaya, ___________________", f"Surabaya, {today_date}")
-            
-            # Ganti TTD dan Nama
-            if "(Tt Expert Judgement)" in paragraph.text:
-                # Bersihkan teks lama
-                paragraph.text = ""
-                run = paragraph.add_run()
-                
-                # Tambahkan TTD (Ukuran otomatis terkunci di sini)
-                run.add_picture(img_file, width=TTD_WIDTH)
-                
-                # Tambahkan Nama di bawah TTD
-                run.add_break() # Memberi jarak antara gambar dan nama
-                run.add_text(f"({expert_name})")
-                
-                # Opsional: Membuat teks menjadi rata tengah (jika diperlukan)
-                # paragraph.alignment = 1 
+        ttd_size = Cm(4.5)
 
-        # 3. Download Section
+        # PROSES PARAGRAF BIASA
+        for p in doc.paragraphs:
+            process_text_replacement(p, expert_name, img_file, ttd_size)
+
+        # PROSES DALAM TABEL (Ini kunci perbaikannya!)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        process_text_replacement(p, expert_name, img_file, ttd_size)
+
         target_stream = io.BytesIO()
         doc.save(target_stream)
-        
-        st.success("Dokumen berhasil diproses!")
-        st.download_button(
-            label="Download File Hasil",
-            data=target_stream.getvalue(),
-            file_name=f"Validated_Form_{expert_name}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
-    else:
-        st.error("Mohon lengkapi semua input (File, TTD, dan Nama).")
+        st.success("Selesai! Silakan download.")
+        st.download_button("Download Hasil", target_stream.getvalue(), "Hasil_Final.docx")
