@@ -4,59 +4,81 @@ from docx.shared import Cm, Pt
 from datetime import datetime
 import io
 
+# Fungsi untuk mendapatkan tanggal Indonesia
 def get_indo_date():
-    months = {1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni", 
-              7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"}
+    months = {
+        1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 
+        5: "Mei", 6: "Juni", 7: "Juli", 8: "Agustus", 
+        9: "September", 10: "Oktober", 11: "November", 12: "Desember"
+    }
     now = datetime.now()
     return f"{now.day} {months[now.month]} {now.year}"
 
-def process_text_replacement(paragraph, expert_name, img_file, ttd_width):
-    # 1. Ganti Tanggal & Kunci Jarak Bawah 1cm
-    if "Surabaya," in paragraph.text:
-        paragraph.text = f"Surabaya, {get_indo_date()}"
-        # Set jarak setelah baris ini tepat 1cm
-        paragraph.paragraph_format.space_after = Cm(1.0)
-        # Pastikan tidak ada spasi tambahan sebelum baris ini
-        paragraph.paragraph_format.space_before = Pt(0)
-        # Set line spacing ke single agar tidak ada spasi antar baris ekstra
-        paragraph.paragraph_format.line_spacing = 1.0
+st.title("Auto-Sign Expert Judgement (Final)")
 
-    # 2. Ganti TTD dan Nama & Buat Jarak Atas 0
-    if "(Tt Expert Judgement)" in paragraph.text:
-        paragraph.text = "" 
-        # Pastikan paragraf TTD ini menempel tepat di bawah spasi 1cm tadi
-        paragraph.paragraph_format.space_before = Pt(0)
-        paragraph.paragraph_format.space_after = Pt(0)
-        paragraph.paragraph_format.line_spacing = 1.0
-        
-        run = paragraph.add_run()
-        run.add_picture(img_file, width=ttd_width)
-        run.add_break() 
-        run.add_text(f"{expert_name}")
-
-st.title("Auto-Sign Fixer")
-
-uploaded_file = st.file_uploader("Upload Word", type=["docx"])
-img_file = st.file_uploader("Upload TTD", type=["png", "jpg"])
+uploaded_file = st.file_uploader("Upload File Word", type=["docx"])
+img_file = st.file_uploader("Upload TTD (Pastikan sudah di-crop mepet)", type=["png", "jpg", "jpeg"])
 expert_name = st.text_input("Nama Expert")
 
-if st.button("Proses Sekarang"):
+if st.button("Generate Dokumen"):
     if uploaded_file and img_file and expert_name:
         doc = Document(uploaded_file)
-        ttd_size = Cm(4.5)
+        
+        # Ukuran TTD Statis
+        TTD_WIDTH = Cm(4.5)
+        # Jarak yang kamu mau (0,5 cm)
+        TARGET_SPACING = Cm(0.5)
 
-        # PROSES PARAGRAF BIASA
-        for p in doc.paragraphs:
-            process_text_replacement(p, expert_name, img_file, ttd_size)
-
-        # PROSES DALAM TABEL (Ini kunci perbaikannya!)
+        # 1. Kumpulkan semua paragraf (baik di body utama maupun di dalam tabel)
+        all_paragraphs = list(doc.paragraphs)
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
-                    for p in cell.paragraphs:
-                        process_text_replacement(p, expert_name, img_file, ttd_size)
+                    all_paragraphs.extend(cell.paragraphs)
 
+        # 2. Proses Penggantian & Pengaturan Spasi
+        for i, p in enumerate(all_paragraphs):
+            # Handle Baris Surabaya
+            if "Surabaya," in p.text:
+                p.text = f"Surabaya, {get_indo_date()}"
+                fmt = p.paragraph_format
+                fmt.space_before = Pt(0)
+                fmt.space_after = TARGET_SPACING # Set ke 0.5 cm
+                fmt.line_spacing = 1.0
+                
+                # Cek jika paragraf setelahnya kosong (biasanya bekas 'Enter' manual), kita hilangkan
+                if i + 1 < len(all_paragraphs):
+                    next_p = all_paragraphs[i+1]
+                    if next_p.text.strip() == "" or "(Tt Expert Judgement)" not in next_p.text:
+                        # Jika paragraf setelah Surabaya kosong, kecilkan ukurannya jadi 0
+                        if next_p.text.strip() == "":
+                            next_p.paragraph_format.space_before = Pt(0)
+                            next_p.paragraph_format.space_after = Pt(0)
+                            next_p.paragraph_format.line_spacing = Pt(1)
+
+            # Handle Baris TTD & Nama
+            if "(Tt Expert Judgement)" in p.text:
+                p.text = "" 
+                fmt = p.paragraph_format
+                fmt.space_before = Pt(0) # Menempel tepat setelah spasi 0.5cm dari atas
+                fmt.space_after = Pt(0)
+                fmt.line_spacing = 1.0
+                
+                run = p.add_run()
+                run.add_picture(img_file, width=TTD_WIDTH)
+                run.add_break() 
+                run.add_text(f"{expert_name}")
+
+        # 3. Output
         target_stream = io.BytesIO()
         doc.save(target_stream)
-        st.success("Selesai! Silakan download.")
-        st.download_button("Download Hasil", target_stream.getvalue(), "Hasil_Final.docx")
+        
+        st.success("Dokumen Berhasil Diproses dengan Jarak 0.5 cm!")
+        st.download_button(
+            label="Download Hasil Final",
+            data=target_stream.getvalue(),
+            file_name=f"Validated_{expert_name}.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    else:
+        st.warning("Pastikan File, TTD, dan Nama sudah diisi.")
