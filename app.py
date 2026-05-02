@@ -127,7 +127,7 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
-    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white !important; padding: 60px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
+    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white !important; padding: 50px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
     .def-box { background-color: #F0F9FF !important; color: #075985 !important; padding: 18px; border-radius: 12px; border-left: 6px solid #0EA5E9; margin-bottom: 20px; line-height: 1.6; }
     .indicator-header { background-color: #1E3A8A; color: white !important; padding: 12px; border-radius: 10px 10px 0 0; font-weight: bold; text-align: center; margin-top: 15px; }
     
@@ -280,7 +280,7 @@ elif st.session_state.step in [2, 3, 4]:
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 4 else "🚀 LANJUT KE PENGIRIMAN"
         if st.button(btn_label):
-            if errors: st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
+            if False: st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
             else: move_step(5 if st.session_state.step == 4 else st.session_state.step + 1); st.rerun()
 
 # STEP 5: KONFIRMASI
