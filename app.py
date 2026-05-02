@@ -218,13 +218,19 @@ if st.session_state.step == 0:
 # STEP 1: PETUNJUK & IDENTITAS
 elif st.session_state.step == 1:
     st.title("⚖️ Form Validasi Expert Judgement")
-    st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
-    st.subheader("📝 PETUNJUK PENGISIAN")
-    st.info("Mohon dibaca sebelum memberikan penilaian")
-    st.write("Bapak/Ibu diminta menilai item-item yang telah kami susun dari aspek **Kejelasan**, **Relevansi**, dan **Kesesuaian** dengan skor 1-4.")
-    st.markdown("""
-    0 = "Belum Diisi" | 1 = "Kurang" | 2 = "Cukup" | 3 = "Baik" | 4 = "Baik Sekali"
-    """)
+    st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
+    st.subheader("📝 PETUNJUK PENGISIAN")
+    st.info("Mohon dibaca sebelum memberikan penilaian")
+    st.write("Sehubungan dengan upaya pengembangan instrumen penelitian mengenai tingkat pemaafan (forgiveness) pada mahasiswa, kami meminta Bapak/Ibu untuk menilai item-item yang telah kami susun, dari aspek :")
+    st.markdown("""
+    * **Kejelasan**: Kejelasan bahasa yang digunakan apakah sudah sesuai, jelas, dan mudah dipahami.
+    * **Relevansi**: Relevansi aitem alat ukur yang disusun apakah sudah menggambarkan variabel.
+    * **Kesesuaian**: Kesesuaian aitem yang disusun sudah sesuai dengan indikatornya.
+    """)
+    st.write("Penilaian dilakukan dengan memberikan angka 1-4. Skor **0** berarti Anda belum memberikan penilaian.")
+    st.markdown("""
+    0 = "Belum Diisi" | 1 = "Kurang" | 2 = "Cukup" | 3 = "Baik" | 4 = "Baik Sekali"
+    """)
     st.write("---")
     st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
