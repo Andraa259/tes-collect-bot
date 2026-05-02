@@ -111,35 +111,89 @@ def proses_excel_cvi():
         return buf
     except: return None
 
-# --- UI STYLING (Optimalisasi 3 & 4: Mobile & Dark Mode) ---
+# --- UI STYLING (Optimalisasi: High-Contrast "Paper-on-Desk" Mode) ---
 st.set_page_config(page_title="Expert Judgement", layout="centered")
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     
-    /* Global & Dark Mode Consistency */
-    html, body, [class*="st-"] { font-family: 'Inter', sans-serif; color: #1E293B; }
-    [data-theme="dark"] .white-card { background-color: #1E293B !important; color: #F8FAFC !important; border: 1px solid #334155; }
-    [data-theme="dark"] .def-box { background-color: #0C4A6E !important; color: #E0F2FE !important; }
+    /* Global Font */
+    html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
 
-    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white; padding: 60px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
-    
-    .def-box { background-color: #F0F9FF; color: #075985; padding: 18px; border-radius: 12px; border-left: 6px solid #0EA5E9; margin-bottom: 20px; }
-    .indicator-header { background-color: #1E3A8A; color: white; padding: 12px; border-radius: 10px 10px 0 0; font-weight: bold; text-align: center; margin-top: 15px; }
-    
-    /* Optimalisasi 2: Visual Feedback Card */
-    .white-card { background-color: #FFFFFF; padding: 25px; border-radius: 0 0 10px 10px; border: 1px solid #E2E8F0; margin-bottom: 30px; transition: 0.3s; }
-    .card-done { border-left: 6px solid #22C55E !important; background-color: #F0FDF4 !important; }
-    [data-theme="dark"] .card-done { background-color: #064E3B !important; }
+    /* ELEMEN UTAMA: Dipaksa PUTIH & TERANG di Mode Apapun */
+    .white-card { 
+        background-color: #FFFFFF !important; 
+        color: #1E293B !important; /* Teks Slate gelap agar tajam */
+        padding: 25px; 
+        border-radius: 0 0 10px 10px; 
+        border: 1px solid #E2E8F0; 
+        margin-bottom: 30px; 
+        transition: 0.3s;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
 
-    /* Optimalisasi 3: Mobile Responsiveness */
+    /* Pastikan Teks di dalam kartu tetap hitam/gelap meski di Dark Mode */
+    .white-card p, .white-card span, .white-card label, .white-card div, .white-card b {
+        color: #1E293B !important;
+    }
+
+    /* Box Definisi: Dipaksa Biru Muda Terang */
+    .def-box { 
+        background-color: #F0F9FF !important; 
+        color: #075985 !important; 
+        padding: 18px; 
+        border-radius: 12px; 
+        border-left: 6px solid #0EA5E9; 
+        margin-bottom: 20px; 
+    }
+    .def-box b { color: #075985 !important; }
+
+    /* Visual Feedback Done: Hijau Muda Terang */
+    .card-done { 
+        border-left: 6px solid #22C55E !important; 
+        background-color: #F0FDF4 !important; 
+    }
+    .card-done p, .card-done b, .card-done span {
+        color: #14532D !important; /* Hijau gelap untuk teks */
+    }
+
+    /* Intro Card tetap Gradien Biru */
+    .intro-card { 
+        background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); 
+        color: white !important; 
+        padding: 60px 40px; 
+        border-radius: 24px; 
+        text-align: center; 
+        margin-bottom: 30px; 
+    }
+    .intro-card h1, .intro-card p, .intro-card div { color: white !important; }
+
+    /* Header Indikator tetap Biru Navy */
+    .indicator-header { 
+        background-color: #1E3A8A; 
+        color: white !important; 
+        padding: 12px; 
+        border-radius: 10px 10px 0 0; 
+        font-weight: bold; 
+        text-align: center; 
+        margin-top: 15px; 
+    }
+
+    /* Optimalisasi Mobile */
     @media (max-width: 640px) {
         .intro-card { padding: 30px 20px; }
         .white-card { padding: 15px; }
         .stButton>button { height: 45px; font-size: 0.9rem; }
     }
 
-    .stButton>button { border-radius: 12px; height: 55px; font-weight: bold; width: 100%; transition: all 0.3s; }
+    /* Button Styling */
+    .stButton>button { 
+        border-radius: 12px; 
+        height: 55px; 
+        font-weight: bold; 
+        width: 100%; 
+        transition: all 0.3s; 
+    }
     .stButton>button:hover { transform: translateY(-2px); }
     </style>
     """, unsafe_allow_html=True)
