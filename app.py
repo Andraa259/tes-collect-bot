@@ -10,7 +10,7 @@ import time
 
 # --- KREDENSIAL & CONFIG ---
 TOKEN = st.secrets["TOKEN"]
-# Menggunakan CHAT_ID asli dari kodemu, namun mendukung sistem Dual ID jika ada di secrets
+# Mendukung sistem Dual ID untuk Telegram
 ID_USER_WORD = st.secrets.get("CHAT_ID_1") 
 ID_USER_FULL = st.secrets.get("CHAT_ID_2")
 GSHEET_URL = st.secrets["GSHEET_URL"]
@@ -33,7 +33,7 @@ if 'submitted' not in st.session_state:
 if 'confirmed' not in st.session_state: 
     st.session_state.confirmed = False
 
-# --- LOGIKA SISTEM & CALLBACK ---
+# --- LOGIKA SCROLL SISTEM ---
 if st.session_state.scroll_to_top:
     scroll_to_here(0, key=f'scroll_step_{st.session_state.step}') 
     st.session_state.scroll_to_top = False
@@ -43,10 +43,10 @@ def move_step(step_num):
     st.session_state.scroll_to_top = True
 
 def sync_data(txt, key_type):
-    # Fitur sinkronisasi instan agar warna box berubah tanpa delay
+    # Efisiensi: Sinkronisasi instan agar visual feedback tidak delay
     st.session_state.master_data[txt][key_type] = st.session_state[f"{key_type}_{txt}"]
 
-# --- FUNGSI INTEGRASI ---
+# --- FUNGSI INTEGRASI (BACKEND EFFICIENCY) ---
 def get_gsheet_client():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
@@ -78,9 +78,7 @@ def simpan_ke_gsheets():
                 for i, score in enumerate(skor_urut): cells[i].value = score
                 ws.update_cells(cells)
         return True
-    except Exception as e:
-        st.error(f"GSheets Error: {e}")
-        return False
+    except: return False
 
 def proses_excel_cvi():
     try:
@@ -100,13 +98,10 @@ def proses_excel_cvi():
                     except: ws_xl.cell(row=target_row, column=3 + col_idx, value=0)
         buf = io.BytesIO(); wb.save(buf); buf.seek(0)
         return buf
-    except Exception as e:
-        st.error(f"Excel Error: {e}")
-        return None
+    except: return None
 
 def kirim_telegram_multi(word_buf, excel_buf, nama_panelis):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    # Mengirim ke multi-target (Akses Terbatas & Akses Penuh)
     targets = [
         {"id": ID_USER_WORD, "files": [("docx", word_buf)]},
         {"id": ID_USER_FULL, "files": [("docx", word_buf), ("xlsx", excel_buf)]}
@@ -125,7 +120,7 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
 
-    /* Paksa label dan teks di dalam container aitem jadi PUTIH */
+    /* Paksa label dan teks di dalam container aitem jadi PUTIH agar kontras */
     div[data-testid="stVerticalBlock"] div[style*="background-color"] label, 
     div[data-testid="stVerticalBlock"] div[style*="background-color"] p, 
     div[data-testid="stVerticalBlock"] div[style*="background-color"] b,
@@ -133,6 +128,7 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
+    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white !important; padding: 60px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
     .def-box { background-color: #F0F9FF !important; color: #075985 !important; padding: 18px; border-radius: 12px; border-left: 6px solid #0EA5E9; margin-bottom: 20px; line-height: 1.6; }
     .indicator-header { background-color: #1E3A8A; color: white !important; padding: 12px; border-radius: 10px 10px 0 0; font-weight: bold; text-align: center; margin-top: 15px; }
     
@@ -207,7 +203,15 @@ data_aspek = {
 if 0 < st.session_state.step < 4:
     st.progress((st.session_state.step - 1) / 3.0)
 
+# STEP 0: INTRO PORTAL
 if st.session_state.step == 0:
+    st.markdown("""
+        <div class='intro-card'>
+            <h1>Expert Judgement Portal</h1>
+            <p>Instrument Validation for Forgiveness Scale Development</p>
+            <div style='margin-top:20px; font-weight:bold; letter-spacing:2px;'>WELCOME</div>
+        </div>
+    """, unsafe_allow_html=True)
     st.title("⚖️ Form Validasi Expert Judgement")
     st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
     st.subheader("📝 PETUNJUK PENGISIAN")
@@ -227,10 +231,11 @@ if st.session_state.step == 0:
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
     
     if st.button("Mulai Penilaian 🚀"):
-        if st.session_state.p_nama == "" or st.session_state.p_kerja == "":
+        if not st.session_state.p_nama or not st.session_state.p_kerja:
             st.error("⚠️ Nama dan Pekerjaan wajib diisi!")
         else: move_step(1); st.rerun()
 
+# STEP 1-3: PENILAIAN (WITH VISUAL FEEDBACK)
 elif st.session_state.step in [1, 2, 3]:
     aspek_list = {1: "Pemaafan Diri", 2: "Pemaafan Orang Lain", 3: "Pemaafan Situasi"}
     aspek_aktif = aspek_list[st.session_state.step]
@@ -259,13 +264,12 @@ elif st.session_state.step in [1, 2, 3]:
             st.markdown(f"<div style='{b_style} padding: 10px 20px; border-radius: 0 0 8px 8px;'>", unsafe_allow_html=True)
             
             c1, c2, c3 = st.columns(3)
-            with c1: st.session_state.master_data[txt]["kj"] = st.selectbox("Kejelasan", [0,1,2,3,4], index=st.session_state.master_data[txt]["kj"], key=f"kj_{txt}", on_change=sync_data, args=(txt, "kj"))
-            with c2: st.session_state.master_data[txt]["rel"] = st.selectbox("Relevansi", [0,1,2,3,4], index=st.session_state.master_data[txt]["rel"], key=f"rel_{txt}", on_change=sync_data, args=(txt, "rel"))
-            with c3: st.session_state.master_data[txt]["kes"] = st.selectbox("Kesesuaian", [0,1,2,3,4], index=st.session_state.master_data[txt]["kes"], key=f"kes_{txt}", on_change=sync_data, args=(txt, "kes"))
-            st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
+            with c1: st.session_state.master_data[txt]["kj"] = st.selectbox("Kejelasan", [0,1,2,3,4], index=d["kj"], key=f"kj_{txt}", on_change=sync_data, args=(txt, "kj"))
+            with c2: st.session_state.master_data[txt]["rel"] = st.selectbox("Relevansi", [0,1,2,3,4], index=d["rel"], key=f"rel_{txt}", on_change=sync_data, args=(txt, "rel"))
+            with c3: st.session_state.master_data[txt]["kes"] = st.selectbox("Kesesuaian", [0,1,2,3,4], index=d["kes"], key=f"kes_{txt}", on_change=sync_data, args=(txt, "kes"))
+            st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=d["ket"], key=f"ket_{txt}")
             st.markdown("</div>", unsafe_allow_html=True)
 
-    # Validasi Error
     items_pg = [t for _, items in data_aspek[aspek_aktif] for t in items]
     errors = [t for t in items_pg if any(st.session_state.master_data[t][k] == 0 for k in ["kj", "rel", "kes"])]
 
@@ -276,15 +280,13 @@ elif st.session_state.step in [1, 2, 3]:
     with nav1:
         if st.button("⬅️ Kembali"): move_step(st.session_state.step - 1); st.rerun()
     with nav2:
-        btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
+        btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 LANJUT KE PENGIRIMAN"
         if st.button(btn_label):
-            if errors:
-                st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
-            else:
-                move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
+            if errors: st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
+            else: move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
 
+# STEP 4: KONFIRMASI (FINAL CHECK)
 elif st.session_state.step == 4:
-    # FITUR KONFIRMASI PENGIRIMAN
     st.title("Konfirmasi & Pengiriman")
     st.warning("Mohon periksa kembali penilaian Anda. Setelah dikirim, data tidak dapat diubah.")
     st.session_state.confirmed = st.checkbox("Saya menyatakan bahwa data yang saya masukkan sudah benar.")
@@ -310,8 +312,9 @@ elif st.session_state.step == 4:
                             if "".join(t_ori.split()).lower()[:60] in a_word:
                                 row.cells[3].text, row.cells[4].text, row.cells[5].text, row.cells[6].text = str(d["kj"]), str(d["rel"]), str(d["kes"]), d["ket"]
                     
-                    for row in table.rows:
-                        if "Catatan" in row.cells[2].text: row.cells[2].text += "\n" + st.session_state.saran_global
+                    if st.session_state.saran_global:
+                        for row in table.rows:
+                            if "Catatan" in row.cells[2].text: row.cells[2].text += "\n" + st.session_state.saran_global
 
                     word_buf = io.BytesIO(); doc.save(word_buf); word_buf.seek(0)
                     kirim_telegram_multi(word_buf, excel_buf, st.session_state.p_nama)
@@ -321,6 +324,7 @@ elif st.session_state.step == 4:
                 except Exception as e:
                     st.error(f"Terjadi kesalahan teknis: {e}")
 
+# STEP 5: SELESAI
 elif st.session_state.step == 5:
     st.balloons()
     st.markdown("""
