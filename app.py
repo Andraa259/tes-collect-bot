@@ -6,15 +6,17 @@ import openpyxl
 import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_scroll_to_top import scroll_to_here
+import time
 
 # --- KREDENSIAL & CONFIG ---
 TOKEN = st.secrets["TOKEN"]
-CHAT_ID = st.secrets["CHAT_ID"]
+ID_USER_WORD = st.secrets["CHAT_ID_1"]  # Akses: Word Only
+ID_USER_FULL = st.secrets["CHAT_ID_2"]  # Akses: Word & Excel
 GSHEET_URL = st.secrets["GSHEET_URL"]
 
 # --- INITIALIZING SESSION STATE ---
 if 'step' not in st.session_state:
-    st.session_state.step = 0
+    st.session_state.step = 0 # Step 0 sekarang untuk Intro
 if 'scroll_to_top' not in st.session_state:
     st.session_state.scroll_to_top = False
 if 'master_data' not in st.session_state:
@@ -28,129 +30,110 @@ if 'saran_global' not in st.session_state:
 if 'submitted' not in st.session_state:
     st.session_state.submitted = False
 
-# --- LOGIKA SCROLL ---
+# --- LOGIKA OPTIMASI SCROLL ---
+# Diletakkan paling atas agar setiap rerun (pindah step) langsung trigger scroll ke 0
 if st.session_state.scroll_to_top:
-    scroll_to_here(0, key=f'scroll_step_{st.session_state.step}') 
+    scroll_to_here(0, key=f'scroll_trigger_{st.session_state.step}')
     st.session_state.scroll_to_top = False
 
 def move_step(step_num):
-    st.session_state.step = step_num
+    # Set scroll true dulu baru pindah step
     st.session_state.scroll_to_top = True
+    st.session_state.step = step_num
 
-def kirim_ke_telegram(file_stream, nama_panelis, format_file):
+# --- FUNGSI MULTI-SEND TELEGRAM ---
+def kirim_telegram_multi(word_buf, excel_buf, nama_panelis):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    filename = f'Form_{nama_panelis}.docx' if format_file == "docx" else f'CVI_Aiken_Kumulatif_{nama_panelis}.xlsx'
-    files = {'document': (filename, file_stream)}
-    payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data {format_file.upper()} Masuk: {nama_panelis}"}
-    return requests.post(url, data=payload, files=files)
+    
+    # Konfigurasi Target
+    targets = [
+        {"id": ID_USER_WORD, "files": [("docx", word_buf)]},
+        {"id": ID_USER_FULL, "files": [("docx", word_buf), ("xlsx", excel_buf)]}
+    ]
+    
+    for target in targets:
+        for f_type, f_buf in target["files"]:
+            if f_buf is not None:
+                ext = f_type
+                fname = f"Form_{nama_panelis}.docx" if f_type == "docx" else f"CVI_Aiken_{nama_panelis}.xlsx"
+                f_buf.seek(0) # Reset pointer
+                files = {'document': (fname, f_buf)}
+                payload = {'chat_id': target["id"], 'caption': f"✅ Data {f_type.upper()} Masuk: {nama_panelis}"}
+                requests.post(url, data=payload, files=files)
 
-# --- FUNGSI HELPER: KONEKSI GSHEETS ---
+# --- FUNGSI GSHEETS & EXCEL (LOGIKA TETAP C4-C33) ---
 def get_gsheet_client():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
     return gspread.authorize(creds)
 
-# --- FUNGSI SIMPAN KE GSHEETS (PER KATEGORI, CEK C4-C33, TANPA PEKERJAAN) ---
 def simpan_ke_gsheets():
     try:
-        client = get_gsheet_client()
-        ss = client.open_by_url(GSHEET_URL)
-        
-        # Mapping nama sheet GSheets ke key data di master_data
-        kategori_map = {
-            "KEJELASAN": "kj",
-            "RELEVANSI": "rel",
-            "KESESUAIAN": "kes"
-        }
-
+        ss = get_gsheet_client().open_by_url(GSHEET_URL)
+        kategori_map = {"KEJELASAN": "kj", "RELEVANSI": "rel", "KESESUAIAN": "kes"}
         for sheet_name, key_data in kategori_map.items():
             ws = ss.worksheet(sheet_name)
-            col_c = ws.col_values(3) # Cek isi kolom C untuk cari baris kosong
-            
+            col_c = ws.col_values(3)
             target_row = 4
-            for r in range(4, 34): # Range C4 sampai C33
+            for r in range(4, 34):
                 if r > len(col_c) or not col_c[r-1]:
                     target_row = r
                     break
                 target_row = r + 1
-            
             if target_row <= 33:
-                # Tulis Nama di Kolom B (Tanpa Pekerjaan)
                 ws.update_cell(target_row, 2, st.session_state.p_nama)
-                
-                # Ambil skor urut 1-36
                 skor_urut = []
                 for aspek in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
                     for _, items in data_aspek[aspek]:
                         for txt in items:
-                            val = st.session_state.master_data.get(txt, {key_data: 0})[key_data]
-                            skor_urut.append(val)
-                
-                # Update horizontal mulai Kolom C
+                            skor_urut.append(st.session_state.master_data.get(txt, {key_data: 0})[key_data])
                 cells = ws.range(target_row, 3, target_row, 3 + len(skor_urut) - 1)
-                for i, score in enumerate(skor_urut):
-                    cells[i].value = score
+                for i, score in enumerate(skor_urut): cells[i].value = score
                 ws.update_cells(cells)
-            else:
-                print(f"TERMINAL LOG: Sheet {sheet_name} sudah penuh (baris 33 reached).")
-                
         return True
     except Exception as e:
         print(f"TERMINAL ERROR GSHEETS: {str(e)}")
-        st.error(f"GSheets Write Error: {e}")
         return False
 
-# --- FUNGSI EXCEL KUMULATIF (SINRON DARI GSHEETS) ---
 def proses_excel_cvi():
     try:
         client = get_gsheet_client()
         ss = client.open_by_url(GSHEET_URL)
         wb = openpyxl.load_workbook("CVI Aiken Zuyy.xlsx")
-        
         for sheet_name in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
             ws_gs = ss.worksheet(sheet_name)
             all_vals = ws_gs.get_all_values()
             ws_xl = wb[sheet_name]
-            
-            # Ambil data dari GSheets mulai baris 4
-            for idx, row_data in enumerate(all_vals[3:]): # Index 3 adalah baris 4
+            for idx, row_data in enumerate(all_vals[3:]):
                 target_row = 4 + idx
-                if target_row > 33 or not row_data[2]: # Berhenti jika baris > 33 atau kolom C kosong
-                    break
-                
-                # Tulis Nama ke Excel (Kolom B)
+                if target_row > 33 or not row_data[2]: break
                 ws_xl.cell(row=target_row, column=2, value=row_data[1])
-                
-                # Tulis Skor ke Excel (Kolom C dst)
-                for col_idx, val in enumerate(row_data[2:38]): # Ambil item 1-36
-                    try:
-                        ws_xl.cell(row=target_row, column=3 + col_idx, value=int(float(val)))
-                    except:
-                        ws_xl.cell(row=target_row, column=3 + col_idx, value=0)
-        
+                for col_idx, val in enumerate(row_data[2:38]):
+                    try: ws_xl.cell(row=target_row, column=3 + col_idx, value=int(float(val)))
+                    except: ws_xl.cell(row=target_row, column=3 + col_idx, value=0)
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
         return buf
     except Exception as e:
         print(f"TERMINAL ERROR EXCEL: {str(e)}")
-        st.error(f"Excel Processing Error: {e}")
         return None
 
 # --- UI STYLING ---
 st.set_page_config(page_title="Expert Judgement", layout="centered")
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap');
+    html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
+    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white; padding: 60px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
     .def-box { background-color: #F0F9FF; color: #075985; padding: 18px; border-radius: 12px; border-left: 6px solid #0EA5E9; margin-bottom: 20px; line-height: 1.6; }
     .indicator-header { background-color: #1E3A8A; color: white; padding: 12px; border-radius: 10px 10px 0 0; font-weight: bold; text-align: center; margin-top: 15px; }
     .white-card { background-color: #FFFFFF; color: #1E293B; padding: 25px; border-radius: 0 0 10px 10px; border: 1px solid #E2E8F0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); margin-bottom: 30px; }
-    .stButton>button { border-radius: 10px; height: 50px; font-weight: bold; width: 100%; }
+    .stButton>button { border-radius: 12px; height: 55px; font-weight: bold; width: 100%; transition: all 0.3s; }
+    .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
     .thanks-card { text-align: center; padding: 40px; background-color: #F8FAFC; border-radius: 20px; border: 1px solid #E2E8F0; margin-top: 50px; }
-    hr { margin: 15px 0; border-top: 1px solid #eee; }
     </style>
     """, unsafe_allow_html=True)
-
-DEF_OP = "Pemaafan adalah kemampuan individual dalam membingkai ulang terhadap suatu kesalahan yang dialami/dirasakan sehingga mampu berhenti menyalahkan diri sendiri dan melepaskan pikiran negatif tentang diri sendiri, memahami kesalahan orang lain seiring berjalannya waktu serta berhenti berpikir buruk tentang orang yang pernah menyakiti, dan mampu berdamai dengan keadaan buruk dalam hidup serta melepaskan pikiran negatif terhadap peristiwa yang berada di luar kendali."
 
 # --- DATA INDIKATOR ---
 data_aspek = {
@@ -212,21 +195,31 @@ data_aspek = {
 
 # --- ALUR APLIKASI ---
 
+# STEP 0: AESTHETIC INTRO
 if st.session_state.step == 0:
+    st.markdown("""
+        <div class='intro-card'>
+            <h1 style='font-size: 2.5rem; margin-bottom: 10px;'>Expert Judgement Portal</h1>
+            <p style='font-size: 1.1rem; opacity: 0.9;'>Instrument Validation for Forgiveness Scale Development</p>
+            <div style='margin-top: 30px; font-weight: bold; letter-spacing: 2px;'>WELCOME</div>
+        </div>
+    """, unsafe_allow_html=True)
+    st.write("---")
+    st.write("Selamat datang di sistem validasi instrumen. Partisipasi Anda sebagai ahli sangat krusial dalam menjamin kualitas alat ukur penelitian ini.")
+    if st.button("Masuk Ke Pengisian ➔"):
+        move_step(1); st.rerun()
+
+# STEP 1: PETUNJUK & IDENTITAS (ASLI STEP 0)
+elif st.session_state.step == 1:
     st.title("⚖️ Form Validasi Expert Judgement")
-    st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{'Pemaafan adalah kemampuan individual dalam membingkai ulang terhadap suatu kesalahan yang dialami/dirasakan sehingga mampu berhenti menyalahkan diri sendiri dan melepaskan pikiran negatif tentang diri sendiri, memahami kesalahan orang lain seiring berjalannya waktu serta berhenti berpikir buruk tentang orang yang pernah menyakiti, dan mampu berdamai dengan keadaan buruk dalam hidup serta melepaskan pikiran negatif terhadap peristiwa yang berada di luar kendali.'}</div>", unsafe_allow_html=True)
     st.subheader("📝 PETUNJUK PENGISIAN")
-    st.info("Mohon dibaca sebelum memberikan penilaian")
-    st.write("Sehubungan dengan upaya pengembangan instrumen penelitian mengenai tingkat pemaafan (forgiveness) pada mahasiswa, kami meminta Bapak/Ibu untuk menilai item-item yang telah kami susun, dari aspek :")
     st.markdown("""
-    * **Kejelasan**: Kejelasan bahasa yang digunakan apakah sudah sesuai, jelas, dan mudah dipahami.
-    * **Relevansi**: Relevansi aitem alat ukur yang disusun apakah sudah menggambarkan variabel.
-    * **Kesesuaian**: Kesesuaian aitem yang disusun sudah sesuai dengan indikatornya.
+    * **Kejelasan**: Kejelasan bahasa yang digunakan apakah sudah sesuai.
+    * **Relevansi**: Relevansi aitem alat ukur apakah sudah menggambarkan variabel.
+    * **Kesesuaian**: Kesesuaian aitem dengan indikatornya.
     """)
-    st.write("Penilaian dilakukan dengan memberikan angka 1-4. Skor **0** berarti Anda belum memberikan penilaian.")
-    st.markdown("""
-    0 = "Belum Diisi" | 1 = "Kurang" | 2 = "Cukup" | 3 = "Baik" | 4 = "Baik Sekali"
-    """)
+    st.markdown("> **Skala 1-4**: 1=Kurang | 2=Cukup | 3=Baik | 4=Baik Sekali")
     
     st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
@@ -234,113 +227,88 @@ if st.session_state.step == 0:
     if st.button("Mulai Penilaian 🚀"):
         if st.session_state.p_nama == "" or st.session_state.p_kerja == "":
             st.error("⚠️ Nama dan Pekerjaan wajib diisi!")
-        else: move_step(1); st.rerun()
+        else: move_step(2); st.rerun()
 
-elif st.session_state.step in [1, 2, 3]:
-    aspek_list = {1: "Pemaafan Diri", 2: "Pemaafan Orang Lain", 3: "Pemaafan Situasi"}
-    aspek_aktif = aspek_list[st.session_state.step]
+# STEP 2, 3, 4: SCORING (ASLI STEP 1, 2, 3)
+elif st.session_state.step in [2, 3, 4]:
+    idx_map = {2: "Pemaafan Diri", 3: "Pemaafan Orang Lain", 4: "Pemaafan Situasi"}
+    aspek_aktif = idx_map[st.session_state.step]
     st.subheader(f"Aspek: {aspek_aktif}")
 
     current_page_items = []
-    for _, items in data_aspek[aspek_aktif]:
-        current_page_items.extend(items)
+    for _, items in data_aspek[aspek_aktif]: current_page_items.extend(items)
 
     for ind_name, items in data_aspek[aspek_aktif]:
         st.markdown(f"<div class='indicator-header'>{ind_name}</div>", unsafe_allow_html=True)
         for txt in items:
             if txt not in st.session_state.master_data:
                 st.session_state.master_data[txt] = {"kj": 0, "rel": 0, "kes": 0, "ket": ""}
-            
             with st.container():
                 st.markdown("<div class='white-card'>", unsafe_allow_html=True)
                 st.write(f"**{txt}**")
                 c1, c2, c3 = st.columns(3)
-                
                 with c1: st.session_state.master_data[txt]["kj"] = st.selectbox("Kejelasan", [0,1,2,3,4], index=st.session_state.master_data[txt]["kj"], key=f"kj_{txt}")
                 with c2: st.session_state.master_data[txt]["rel"] = st.selectbox("Relevansi", [0,1,2,3,4], index=st.session_state.master_data[txt]["rel"], key=f"rel_{txt}")
                 with c3: st.session_state.master_data[txt]["kes"] = st.selectbox("Kesesuaian", [0,1,2,3,4], index=st.session_state.master_data[txt]["kes"], key=f"kes_{txt}")
-                
-                st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
+                st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
-    errors = []
-    for txt in current_page_items:
-        d = st.session_state.master_data[txt]
-        if d["kj"] == 0 or d["rel"] == 0 or d["kes"] == 0:
-            errors.append(txt)
-
-    if st.session_state.step == 3:
-        st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:", value=st.session_state.saran_global)
+    errors = [txt for txt in current_page_items if any(st.session_state.master_data[txt][k] == 0 for k in ["kj", "rel", "kes"])]
+    if st.session_state.step == 4: st.session_state.saran_global = st.text_area("Catatan Akhir:", value=st.session_state.saran_global)
 
     nav1, nav2 = st.columns(2)
     with nav1:
         if st.button("⬅️ Kembali"): move_step(st.session_state.step - 1); st.rerun()
     with nav2:
-        btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 KIRIM HASIL"
+        btn_label = "Lanjut ➡️" if st.session_state.step < 4 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
-            if False:
-                st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini. Mohon lengkapi semua skor (tidak boleh 0) sebelum lanjut.")
-            else:
-                move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
+            if False: st.error(f"⚠️ Lengkapi {len(errors)} soal di halaman ini.")
+            else: move_step(5); st.rerun()
 
-elif st.session_state.step == 4:
-    st.title("Sedang Memproses...")
+# STEP 5: PROCESSING (ASLI STEP 4)
+elif st.session_state.step == 5:
+    st.title("Finalisasi...")
     if not st.session_state.submitted:
-        with st.spinner("Sedang memproses database dan dokumen..."):
+        with st.spinner("Mengunci data ke GSheets & Mengirim Dokumen..."):
             try:
-                # 1. Simpan ke GSheets (Per Kategori)
+                # 1. GSheets & Excel
                 simpan_ke_gsheets()
-
-                # 2. Proses Excel Kumulatif (Sinkron GSheets)
                 excel_buf = proses_excel_cvi()
-                if excel_buf:
-                    kirim_ke_telegram(excel_buf, st.session_state.p_nama, "xlsx")
-
-                # 3. Proses Word (Tetap kirim detail Nama & Pekerjaan)
+                
+                # 2. Word
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                     if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
-                
                 table = doc.tables[0]
                 for row in table.rows:
-                    aitem_word = "".join(row.cells[2].text.split()).lower()
+                    aitem_txt = "".join(row.cells[2].text.split()).lower()
                     for txt_ori, data in st.session_state.master_data.items():
-                        txt_normalized = "".join(txt_ori.split()).lower()
-                        if txt_normalized[:60] in aitem_word:
-                            row.cells[3].text = str(data["kj"])
-                            row.cells[4].text = str(data["rel"])
-                            row.cells[5].text = str(data["kes"])
-                            row.cells[6].text = str(data["ket"])
-                
+                        if "".join(txt_ori.split()).lower()[:60] in aitem_txt:
+                            row.cells[3].text, row.cells[4].text, row.cells[5].text, row.cells[6].text = str(data["kj"]), str(data["rel"]), str(data["kes"]), data["ket"]
                 for row in table.rows:
-                    if "Catatan" in row.cells[2].text:
-                        row.cells[2].text += "\n" + st.session_state.saran_global
-
+                    if "Catatan" in row.cells[2].text: row.cells[2].text += "\n" + st.session_state.saran_global
                 word_buf = io.BytesIO()
                 doc.save(word_buf)
                 word_buf.seek(0)
-                kirim_ke_telegram(word_buf, st.session_state.p_nama, "docx")
+                
+                # 3. Multi-Send Telegram dengan Level Akses
+                kirim_telegram_multi(word_buf, excel_buf, st.session_state.p_nama)
                 
                 st.session_state.submitted = True
-                move_step(5); st.rerun()
+                move_step(6); st.rerun()
             except Exception as e:
-                print(f"TERMINAL ERROR: {str(e)}")
-                st.error(f"Terjadi kesalahan teknis: {e}")
-                if st.button("Kembali ke Penilaian"): move_step(3); st.rerun()
-    else:
-        move_step(5); st.rerun()
+                st.error(f"Error: {e}")
+                if st.button("Ulangi"): move_step(4); st.rerun()
+    else: move_step(6); st.rerun()
 
-elif st.session_state.step == 5:
+# STEP 6: THANKS (ASLI STEP 5)
+elif st.session_state.step == 6:
     st.balloons()
     st.markdown("""
         <div class='thanks-card'>
             <h1 style='color: #1E3A8A;'>Terima Kasih! ✨</h1>
-            <p style='font-size: 1.2rem; color: #475569;'>
-                Data penilaian Anda telah berhasil kami terima dan dikirimkan ke peneliti. 
-                Kontribusi Anda sangat berharga bagi pengembangan instrumen penelitian ini.
-            </p>
-            <hr>
-            <p style='font-style: italic; color: #64748b;'>Halaman ini dapat Anda tutup sekarang.</p>
+            <p>Data penilaian Anda telah kami terima secara kumulatif.</p>
+            <hr><p style='font-style: italic;'>Halaman ini dapat Anda tutup sekarang.</p>
         </div>
     """, unsafe_allow_html=True)
