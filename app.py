@@ -10,7 +10,6 @@ import time
 
 # --- KREDENSIAL & CONFIG ---
 TOKEN = st.secrets["TOKEN"]
-# Mendukung sistem Dual ID untuk Telegram
 ID_USER_WORD = st.secrets.get("CHAT_ID_1") 
 ID_USER_FULL = st.secrets.get("CHAT_ID_2")
 GSHEET_URL = st.secrets["GSHEET_URL"]
@@ -46,7 +45,7 @@ def sync_data(txt, key_type):
     # Efisiensi: Sinkronisasi instan agar visual feedback tidak delay
     st.session_state.master_data[txt][key_type] = st.session_state[f"{key_type}_{txt}"]
 
-# --- FUNGSI INTEGRASI (BACKEND EFFICIENCY) ---
+# --- FUNGSI INTEGRASI ---
 def get_gsheet_client():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
@@ -113,7 +112,7 @@ def kirim_telegram_multi(word_buf, excel_buf, nama_panelis):
                 f_buf.seek(0)
                 requests.post(url, data={'chat_id': target["id"], 'caption': f"✅ {f_type.upper()} Masuk: {nama_panelis}"}, files={'document': (fname, f_buf)})
 
-# --- UI STYLING (Forced Dark Mode Boxes + White Text) ---
+# --- UI STYLING ---
 st.set_page_config(page_title="Expert Judgement", layout="centered")
 st.markdown("""
     <style>
@@ -128,7 +127,7 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
-    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white !important; padding: 60px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
+    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white !important; padding: 70px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
     .def-box { background-color: #F0F9FF !important; color: #075985 !important; padding: 18px; border-radius: 12px; border-left: 6px solid #0EA5E9; margin-bottom: 20px; line-height: 1.6; }
     .indicator-header { background-color: #1E3A8A; color: white !important; padding: 12px; border-radius: 10px 10px 0 0; font-weight: bold; text-align: center; margin-top: 15px; }
     
@@ -199,45 +198,45 @@ data_aspek = {
 
 # --- ALUR APLIKASI ---
 
-# PROGRESS BAR
-if 0 < st.session_state.step < 4:
-    st.progress((st.session_state.step - 1) / 3.0)
+# PROGRESS BAR (Muncul setelah Step 0)
+if 0 < st.session_state.step < 5:
+    st.progress((st.session_state.step) / 5.0)
 
-# STEP 0: INTRO PORTAL
+# STEP 0: INTRO PORTAL AESTHETIC
 if st.session_state.step == 0:
     st.markdown("""
         <div class='intro-card'>
-            <h1>Expert Judgement Portal</h1>
-            <p>Instrument Validation for Forgiveness Scale Development</p>
-            <div style='margin-top:20px; font-weight:bold; letter-spacing:2px;'>WELCOME</div>
+            <h1 style='font-size: 3rem; margin-bottom: 10px;'>Expert Judgement Portal</h1>
+            <p style='font-size: 1.2rem; opacity: 0.9;'>Instrument Validation for Forgiveness Scale Development</p>
+            <div style='margin-top: 30px; font-weight: bold; letter-spacing: 3px; border: 2px solid white; display: inline-block; padding: 10px 20px; border-radius: 50px;'>WELCOME</div>
         </div>
     """, unsafe_allow_html=True)
+    st.write("---")
+    st.write("Selamat datang di sistem validasi instrumen. Partisipasi Anda sangat krusial dalam menjamin kualitas alat ukur penelitian ini.")
+    if st.button("Mulai Sekarang ➔"): move_step(1); st.rerun()
+
+# STEP 1: PETUNJUK & IDENTITAS
+elif st.session_state.step == 1:
     st.title("⚖️ Form Validasi Expert Judgement")
     st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
     st.subheader("📝 PETUNJUK PENGISIAN")
     st.info("Mohon dibaca sebelum memberikan penilaian")
-    st.write("Sehubungan dengan upaya pengembangan instrumen penelitian mengenai tingkat pemaafan (forgiveness) pada mahasiswa, kami meminta Bapak/Ibu untuk menilai item-item yang telah kami susun, dari aspek :")
-    st.markdown("""
-    * **Kejelasan**: Kejelasan bahasa yang digunakan apakah sudah sesuai, jelas, dan mudah dipahami.
-    * **Relevansi**: Relevansi aitem alat ukur yang disusun apakah sudah menggambarkan variabel.
-    * **Kesesuaian**: Kesesuaian aitem yang disusun sudah sesuai dengan indikatornya.
-    """)
-    st.write("Penilaian dilakukan dengan memberikan angka 1-4. Skor **0** berarti Anda belum memberikan penilaian.")
+    st.write("Bapak/Ibu diminta menilai item-item yang telah kami susun dari aspek **Kejelasan**, **Relevansi**, dan **Kesesuaian** dengan skor 1-4.")
     st.markdown("""
     0 = "Belum Diisi" | 1 = "Kurang" | 2 = "Cukup" | 3 = "Baik" | 4 = "Baik Sekali"
     """)
-    
+    st.write("---")
     st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
     
-    if st.button("Mulai Penilaian 🚀"):
+    if st.button("Lanjut ke Penilaian 🚀"):
         if not st.session_state.p_nama or not st.session_state.p_kerja:
             st.error("⚠️ Nama dan Pekerjaan wajib diisi!")
-        else: move_step(1); st.rerun()
+        else: move_step(2); st.rerun()
 
-# STEP 1-3: PENILAIAN (WITH VISUAL FEEDBACK)
-elif st.session_state.step in [1, 2, 3]:
-    aspek_list = {1: "Pemaafan Diri", 2: "Pemaafan Orang Lain", 3: "Pemaafan Situasi"}
+# STEP 2-4: PENILAIAN
+elif st.session_state.step in [2, 3, 4]:
+    aspek_list = {2: "Pemaafan Diri", 3: "Pemaafan Orang Lain", 4: "Pemaafan Situasi"}
     aspek_aktif = aspek_list[st.session_state.step]
     st.subheader(f"Aspek: {aspek_aktif}")
 
@@ -250,7 +249,6 @@ elif st.session_state.step in [1, 2, 3]:
             d = st.session_state.master_data[txt]
             is_done = d["kj"] > 0 and d["rel"] > 0 and d["kes"] > 0
             
-            # --- THE REVERSE COLOR STRATEGY (Solid BG + White Text) ---
             if is_done:
                 h_style = "background-color: #059669; border-left: 8px solid #047857; border: 1px solid #059669; border-bottom: none;"
                 b_style = "background-color: #10B981; border-left: 8px solid #047857; border: 1px solid #10B981; border-top: none;"
@@ -273,59 +271,52 @@ elif st.session_state.step in [1, 2, 3]:
     items_pg = [t for _, items in data_aspek[aspek_aktif] for t in items]
     errors = [t for t in items_pg if any(st.session_state.master_data[t][k] == 0 for k in ["kj", "rel", "kes"])]
 
-    if st.session_state.step == 3:
+    if st.session_state.step == 4:
         st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:", value=st.session_state.saran_global)
 
     nav1, nav2 = st.columns(2)
     with nav1:
         if st.button("⬅️ Kembali"): move_step(st.session_state.step - 1); st.rerun()
     with nav2:
-        btn_label = "Lanjut ➡️" if st.session_state.step < 3 else "🚀 LANJUT KE PENGIRIMAN"
+        btn_label = "Lanjut ➡️" if st.session_state.step < 4 else "🚀 LANJUT KE PENGIRIMAN"
         if st.button(btn_label):
             if errors: st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
-            else: move_step(4 if st.session_state.step == 3 else st.session_state.step + 1); st.rerun()
+            else: move_step(5 if st.session_state.step == 4 else st.session_state.step + 1); st.rerun()
 
-# STEP 4: KONFIRMASI (FINAL CHECK)
-elif st.session_state.step == 4:
+# STEP 5: KONFIRMASI
+elif st.session_state.step == 5:
     st.title("Konfirmasi & Pengiriman")
     st.warning("Mohon periksa kembali penilaian Anda. Setelah dikirim, data tidak dapat diubah.")
     st.session_state.confirmed = st.checkbox("Saya menyatakan bahwa data yang saya masukkan sudah benar.")
     
     nav1, nav2 = st.columns(2)
     with nav1:
-        if st.button("⬅️ Kembali ke Penilaian"): move_step(3); st.rerun()
+        if st.button("⬅️ Kembali ke Penilaian"): move_step(4); st.rerun()
     with nav2:
         if st.button("🚀 YA, KIRIM SEKARANG", disabled=not st.session_state.confirmed):
-            with st.spinner("Sedang memproses database dan dokumen..."):
+            with st.spinner("Sedang memproses..."):
                 try:
-                    simpan_ke_gsheets()
-                    excel_buf = proses_excel_cvi()
+                    simpan_ke_gsheets(); excel_buf = proses_excel_cvi()
                     doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
                     for p in doc.paragraphs:
                         if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
                         if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
-                    
                     table = doc.tables[0]
                     for row in table.rows:
                         a_word = "".join(row.cells[2].text.split()).lower()
                         for t_ori, d in st.session_state.master_data.items():
                             if "".join(t_ori.split()).lower()[:60] in a_word:
                                 row.cells[3].text, row.cells[4].text, row.cells[5].text, row.cells[6].text = str(d["kj"]), str(d["rel"]), str(d["kes"]), d["ket"]
-                    
                     if st.session_state.saran_global:
                         for row in table.rows:
                             if "Catatan" in row.cells[2].text: row.cells[2].text += "\n" + st.session_state.saran_global
-
                     word_buf = io.BytesIO(); doc.save(word_buf); word_buf.seek(0)
                     kirim_telegram_multi(word_buf, excel_buf, st.session_state.p_nama)
-                    
-                    st.session_state.submitted = True
-                    move_step(5); st.rerun()
-                except Exception as e:
-                    st.error(f"Terjadi kesalahan teknis: {e}")
+                    st.session_state.submitted = True; move_step(6); st.rerun()
+                except Exception as e: st.error(f"Error: {e}")
 
-# STEP 5: SELESAI
-elif st.session_state.step == 5:
+# STEP 6: SELESAI
+elif st.session_state.step == 6:
     st.balloons()
     st.markdown("""
         <div class='thanks-card'>
