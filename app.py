@@ -7,9 +7,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_scroll_to_top import scroll_to_here
 
-# --- KREDENSIAL TELEGRAM ---
+# --- KREDENSIAL TELEGRAM & GSHEETS ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
+GSHEET_URL = st.secrets["GSHEET_URL"] # Ambil URL dari secrets
 
 # --- INITIALIZING SESSION STATE ---
 if 'step' not in st.session_state:
@@ -47,22 +48,20 @@ def kirim_ke_telegram(file_stream, nama_panelis, format_file):
     payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data {format_file.upper()} Masuk: {nama_panelis}"}
     return requests.post(url, data=payload, files=files)
 
-# --- FUNGSI HELPER: KONEKSI GSHEETS ---
+# --- FUNGSI HELPER: KONEKSI GSHEETS VIA URL ---
 def get_gsheet_client():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-    return gspread.authorize(creds)
+    client = gspread.authorize(creds)
+    # Membuka langsung via URL agar presisi
+    return client.open_by_url(GSHEET_URL).sheet1
 
-# --- FUNGSI BARU: GOOGLE SHEETS (DATABASE UTAMA) ---
+# --- FUNGSI SIMPAN KE GSHEETS ---
 def simpan_ke_gsheets():
     try:
-        client = get_gsheet_client()
-        # Buka file GSheets (Pastikan Service Account sudah di-share ke sini sebagai Editor)
-        sheet = client.open("CVI Aiken Zuyy").sheet1
-        
+        sheet = get_gsheet_client()
         row_identitas = [st.session_state.p_nama, st.session_state.p_kerja]
         
-        # Kumpulkan semua skor item 1-36 untuk tiap aspek
         kj_vals, rel_vals, kes_vals = [], [], []
         for aspek in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
             for _, items in data_aspek[aspek]:
@@ -72,73 +71,54 @@ def simpan_ke_gsheets():
                     rel_vals.append(d["rel"])
                     kes_vals.append(d["kes"])
         
-        # Gabungkan: Nama, Kerja, KJ(1-36), REL(1-36), KES(1-36), Saran
         final_row = row_identitas + kj_vals + rel_vals + kes_vals + [st.session_state.saran_global]
         sheet.append_row(final_row)
         return True
     except Exception as e:
-        st.error(f"Gagal Simpan ke GSheets: {e}")
+        st.error(f"GSheets Write Error: {e}")
         return False
 
-# --- FUNGSI BARU: EXCEL KUMULATIF (DARI GSHEETS) ---
+# --- FUNGSI EXCEL KUMULATIF (DARI GSHEETS) ---
 def proses_excel_cvi():
     try:
-        # 1. Tarik data dari Google Sheets
-        client = get_gsheet_client()
-        sheet = client.open("CVI Aiken Zuyy").sheet1
+        sheet = get_gsheet_client()
         all_records = sheet.get_all_values()
         
-        # 2. Buka Template Excel
         wb = openpyxl.load_workbook("CVI Aiken Zuyy.xlsx")
         
-        # 3. Filter hanya baris yang BENAR-BENAR berisi data panelis
-        # Kita skip baris header di GSheets sampai ketemu baris yang Kolom C-nya angka
-        data_panelis_asli = []
-        for row in all_records:
-            # Lewati baris jika kolom C (index 2) kosong atau berisi teks 'NOMER SOAL'
-            if len(row) > 2 and row[2].isdigit():
-                data_panelis_asli.append(row)
-        
-        # 4. Tulis ke Excel (WAJIB MULAI BARIS 4 SAMPAI 33)
-        for idx, row in enumerate(data_panelis_asli):
-            target_row = 4 + idx # Panelis 1 = Baris 4, Panelis 2 = Baris 5...
+        # Filter: Hanya ambil baris yang kolom C (index 2) berisi angka (skip header/teks)
+        data_valid = [row for row in all_records if len(row) > 2 and row[2].replace('.', '', 1).isdigit()]
+
+        for idx, row in enumerate(data_valid):
+            target_row = 4 + idx
+            if target_row > 33: break
             
-            if target_row > 33: # Kunci di baris 33 sesuai instruksi
-                break
-            
-            p_identitas = f"{row[0]} ({row[1]})" # Nama (Pekerjaan)
-            
-            # Ambil potongan skor (KJ, REL, KES)
+            p_identitas = f"{row[0]} ({row[1]})"
+            # Slice data skor
             kj_data = row[2:38]
             rel_data = row[38:74]
             kes_data = row[74:110]
             
-            mapping = {
-                "KEJELASAN": kj_data,
-                "RELEVANSI": rel_data,
-                "KESESUAIAN": kes_data
-            }
-            
+            mapping = {"KEJELASAN": kj_data, "RELEVANSI": rel_data, "KESESUAIAN": kes_data}
             for s_name, scores in mapping.items():
                 ws = wb[s_name]
-                # Tulis Identitas di Kolom B (Penilai)
                 ws.cell(row=target_row, column=2, value=p_identitas)
-                
-                # Tulis Skor MULAI KOLOM C (Index 3)
-                for col_offset, val in enumerate(scores):
+                for col_idx, val in enumerate(scores):
                     try:
-                        # Konversi aman ke integer
-                        ws.cell(row=target_row, column=3 + col_offset, value=int(float(val)))
+                        ws.cell(row=target_row, column=3 + col_idx, value=int(float(val)))
                     except:
-                        ws.cell(row=target_row, column=3 + col_offset, value=0)
+                        ws.cell(row=target_row, column=3 + col_idx, value=0)
         
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
         return buf
     except Exception as e:
-        st.error(f"Gagal Olah Excel: {e}")
+        st.error(f"Excel Processing Error: {e}")
         return None
+
+# --- UI STYLING & DATA INDIKATOR (TIDAK BERUBAH) ---
+# ... (Sisanya tetap sama dengan kodemu sebelumnya) ...
 
 # --- UI STYLING ---
 st.set_page_config(page_title="Expert Judgement", layout="centered")
@@ -291,10 +271,10 @@ elif st.session_state.step == 4:
     if not st.session_state.submitted:
         with st.spinner("Menyimpan data & Mengirim Dokumen..."):
             try:
-                # 1. Simpan ke GSheets (Database Utama)
+                # 1. Simpan ke GSheets (Database)
                 simpan_ke_gsheets()
 
-                # 2. Proses ke Excel (Kumulatif dari GSheets)
+                # 2. Proses ke Excel (Kumulatif dari Database)
                 excel_buf = proses_excel_cvi()
                 if excel_buf:
                     kirim_ke_telegram(excel_buf, st.session_state.p_nama, "xlsx")
