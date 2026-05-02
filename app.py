@@ -32,7 +32,7 @@ def process_text_replacement(paragraph, expert_name, img_file, ttd_width):
         run = paragraph.add_run()
         run.add_picture(img_file, width=ttd_width)
         run.add_break() 
-        run.add_text(f"({expert_name})")
+        run.add_text(f"{expert_name}")
 
 st.title("Auto-Sign Fixer")
 
