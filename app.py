@@ -83,31 +83,54 @@ def simpan_ke_gsheets():
 # --- FUNGSI BARU: EXCEL KUMULATIF (DARI GSHEETS) ---
 def proses_excel_cvi():
     try:
-        # 1. Ambil semua data permanen dari GSheets
+        # 1. Tarik data dari Google Sheets
         client = get_gsheet_client()
         sheet = client.open("CVI Aiken Zuyy").sheet1
         all_records = sheet.get_all_values()
         
-        # 2. Load template Excel asli
+        # 2. Buka Template Excel
         wb = openpyxl.load_workbook("CVI Aiken Zuyy.xlsx")
         
-        # 3. Iterasi setiap baris di GSheets (skip header baris 1)
-        for idx, row in enumerate(all_records[1:]):
-            target_row = 4 + idx
-            if target_row > 33: break
+        # 3. Filter hanya baris yang BENAR-BENAR berisi data panelis
+        # Kita skip baris header di GSheets sampai ketemu baris yang Kolom C-nya angka
+        data_panelis_asli = []
+        for row in all_records:
+            # Lewati baris jika kolom C (index 2) kosong atau berisi teks 'NOMER SOAL'
+            if len(row) > 2 and row[2].isdigit():
+                data_panelis_asli.append(row)
+        
+        # 4. Tulis ke Excel (WAJIB MULAI BARIS 4 SAMPAI 33)
+        for idx, row in enumerate(data_panelis_asli):
+            target_row = 4 + idx # Panelis 1 = Baris 4, Panelis 2 = Baris 5...
             
-            p_identitas = f"{row[0]} ({row[1]})"
-            # Slice data sesuai urutan penyimpanan (KJ: index 2-37, REL: 38-73, KES: 74-109)
+            if target_row > 33: # Kunci di baris 33 sesuai instruksi
+                break
+            
+            p_identitas = f"{row[0]} ({row[1]})" # Nama (Pekerjaan)
+            
+            # Ambil potongan skor (KJ, REL, KES)
             kj_data = row[2:38]
             rel_data = row[38:74]
             kes_data = row[74:110]
             
-            map_sheets = {"KEJELASAN": kj_data, "RELEVANSI": rel_data, "KESESUAIAN": kes_data}
-            for s_name, scores in map_sheets.items():
+            mapping = {
+                "KEJELASAN": kj_data,
+                "RELEVANSI": rel_data,
+                "KESESUAIAN": kes_data
+            }
+            
+            for s_name, scores in mapping.items():
                 ws = wb[s_name]
-                ws.cell(row=target_row, column=2, value=p_identitas) # Kolom B
-                for col_idx, val in enumerate(scores):
-                    ws.cell(row=target_row, column=3 + col_idx, value=int(val)) # Kolom C dst
+                # Tulis Identitas di Kolom B (Penilai)
+                ws.cell(row=target_row, column=2, value=p_identitas)
+                
+                # Tulis Skor MULAI KOLOM C (Index 3)
+                for col_offset, val in enumerate(scores):
+                    try:
+                        # Konversi aman ke integer
+                        ws.cell(row=target_row, column=3 + col_offset, value=int(float(val)))
+                    except:
+                        ws.cell(row=target_row, column=3 + col_offset, value=0)
         
         buf = io.BytesIO()
         wb.save(buf)
