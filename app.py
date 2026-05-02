@@ -308,20 +308,37 @@ elif st.session_state.step in [2, 3, 4]:
             if txt not in st.session_state.master_data:
                 st.session_state.master_data[txt] = {"kj": 0, "rel": 0, "kes": 0, "ket": ""}
             
-            # Optimalisasi 2: Visual Feedback Card
             d = st.session_state.master_data[txt]
             is_done = d["kj"] > 0 and d["rel"] > 0 and d["kes"] > 0
-            card_class = "white-card card-done" if is_done else "white-card"
             
-            with st.container():
-                st.markdown(f"<div class='{card_class}'>", unsafe_allow_html=True)
-                st.write(f"**{txt}** {'✅' if is_done else ''}")
+            # --- FIX VISUAL FEEDBACK ---
+            # Kita buat header item yang berubah warna secara dinamis
+            if is_done:
+                header_html = f"""
+                <div style='background-color: #DCFCE7; border-left: 6px solid #22C55E; padding: 15px; border-radius: 8px 8px 0 0; border: 1px solid #BBF7D0; border-bottom: none; margin-top: 20px;'>
+                    <b style='color: #14532D;'>✅ {txt}</b>
+                </div>
+                """
+            else:
+                header_html = f"""
+                <div style='background-color: #FFFFFF; border-left: 6px solid #E2E8F0; padding: 15px; border-radius: 8px 8px 0 0; border: 1px solid #E2E8F0; border-bottom: none; margin-top: 20px;'>
+                    <b style='color: #1E293B;'>{txt}</b>
+                </div>
+                """
+            
+            st.markdown(header_html, unsafe_allow_html=True)
+            
+            # Widget diletakkan di dalam container dengan border agar menyatu dengan header di atas
+            with st.container(border=True):
                 c1, c2, c3 = st.columns(3)
-                with c1: st.session_state.master_data[txt]["kj"] = st.selectbox("Kejelasan", [0,1,2,3,4], index=st.session_state.master_data[txt]["kj"], key=f"kj_{txt}")
-                with c2: st.session_state.master_data[txt]["rel"] = st.selectbox("Relevansi", [0,1,2,3,4], index=st.session_state.master_data[txt]["rel"], key=f"rel_{txt}")
-                with c3: st.session_state.master_data[txt]["kes"] = st.selectbox("Kesesuaian", [0,1,2,3,4], index=st.session_state.master_data[txt]["kes"], key=f"kes_{txt}")
-                st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}")
-                st.markdown("</div>", unsafe_allow_html=True)
+                with c1: 
+                    st.session_state.master_data[txt]["kj"] = st.selectbox("Kejelasan", [0,1,2,3,4], index=st.session_state.master_data[txt]["kj"], key=f"kj_{txt}")
+                with c2: 
+                    st.session_state.master_data[txt]["rel"] = st.selectbox("Relevansi", [0,1,2,3,4], index=st.session_state.master_data[txt]["rel"], key=f"rel_{txt}")
+                with c3: 
+                    st.session_state.master_data[txt]["kes"] = st.selectbox("Kesesuaian", [0,1,2,3,4], index=st.session_state.master_data[txt]["kes"], key=f"kes_{txt}")
+                
+                st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan per Aitem:", value=st.session_state.master_data[txt]["ket"], key=f"ket_{txt}", placeholder="Tambahkan saran jika ada...")
 
     errors = [txt for txt in current_page_items if any(st.session_state.master_data[txt][k] == 0 for k in ["kj", "rel", "kes"])]
     if st.session_state.step == 4: st.session_state.saran_global = st.text_area("Catatan Akhir:", value=st.session_state.saran_global)
