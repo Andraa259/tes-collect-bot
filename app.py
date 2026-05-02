@@ -13,7 +13,7 @@ def get_indo_date():
     now = datetime.now()
     return f"{now.day} {months[now.month]} {now.year}"
 
-st.title("Auto-Sign Expert (One-Block Logic)")
+st.title("Auto-Sign Expert (Zero Ghost Space)")
 
 uploaded_file = st.file_uploader("Upload Word", type=["docx"])
 img_file = st.file_uploader("Upload TTD", type=["png", "jpg", "jpeg"])
@@ -24,48 +24,48 @@ if st.button("Generate Dokumen"):
         doc = Document(uploaded_file)
         TTD_WIDTH = Cm(4.5)
 
-        # 1. Ambil semua paragraf (body + tabel)
+        # 1. Kumpulkan semua paragraf dari body dan tabel
         all_paragraphs = list(doc.paragraphs)
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     all_paragraphs.extend(cell.paragraphs)
 
-        # 2. Eksekusi Logika Baru
+        # 2. Proses Manipulasi
         for p in all_paragraphs:
-            # Cari baris Surabaya
+            # LOGIKA A: Gabungkan Tanggal, TTD, dan Nama di baris 'Surabaya'
             if "Surabaya," in p.text:
-                # Masukkan Tanggal
-                p.text = f"Surabaya, {get_indo_date()}"
+                # Bersihkan paragraf agar tidak ada formatting lama yang mengganggu
+                p.text = "" 
+                run = p.add_run(f"Surabaya, {get_indo_date()}")
                 
-                # Masukkan TTD dan Nama di paragraf yang SAMA agar rapat
-                run = p.add_run()
-                run.add_break() # Pindah baris untuk TTD
+                # Enter sekali sebelum TTD
+                run.add_break() 
                 run.add_picture(img_file, width=TTD_WIDTH)
-                run.add_break() # Pindah baris untuk Nama
-                run.add_text(f"{expert_name}")
                 
-                # Paksa spasi jadi single dan nol
+                # Enter sekali sebelum Nama
+                run.add_break() 
+                run.add_text(f"({expert_name})")
+                
+                # Pengaturan spasi agar mepet
                 p.paragraph_format.line_spacing = 1.0
                 p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.space_before = Pt(0)
 
-            # Cari baris (Tt Expert Judgement) dan HAPUS total
+            # LOGIKA B: Hapus total paragraf '(Tt Expert Judgement)'
             if "(Tt Expert Judgement)" in p.text:
-                p.text = ""
-                # Ciutkan sisa paragrafnya agar tidak memakan ruang
-                p.paragraph_format.space_before = Pt(0)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.line_spacing = Pt(1)
+                # Menghapus elemen paragraf secara permanen dari dokumen
+                p_element = p._element
+                p_element.getparent().remove(p_element)
 
         # 3. Download
         target_stream = io.BytesIO()
         doc.save(target_stream)
         
-        st.success("Selesai! Logika gabungan berhasil diterapkan.")
+        st.success("Selesai! Spasi siluman telah dihapus.")
         st.download_button(
-            label="Download Hasil",
+            label="Download Hasil Final",
             data=target_stream.getvalue(),
-            file_name=f"Validated_{expert_name}.docx",
+            file_name=f"Validated_Fixed_{expert_name}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
