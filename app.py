@@ -45,7 +45,7 @@ if st.button("Generate Dokumen"):
                 
                 # Enter 2: Setelah TTD ke Nama
                 run.add_break() 
-                run.add_text(f"({expert_name})")
+                run.add_text(f"{expert_name}")
                 
                 # Set spasi baris agar rapat
                 p.paragraph_format.line_spacing = 1.0
