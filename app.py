@@ -24,7 +24,8 @@ if st.button("Generate Dokumen"):
         doc = Document(uploaded_file)
         TTD_WIDTH = Cm(4.5)
 
-        # 1. Kumpulkan semua paragraf dari body dan tabel
+        # 1. Kumpulkan semua paragraf (Body + Tabel)
+        # Kita pakai list baru agar tidak error saat menghapus elemen di tengah jalan
         all_paragraphs = list(doc.paragraphs)
         for table in doc.tables:
             for row in table.rows:
@@ -33,36 +34,51 @@ if st.button("Generate Dokumen"):
 
         # 2. Proses Manipulasi
         for p in all_paragraphs:
-            # LOGIKA A: Gabungkan Tanggal, TTD, dan Nama di baris 'Surabaya'
+            # LOGIKA A: Baris Surabaya (Tempat, Tanggal, TTD, dan Nama)
             if "Surabaya," in p.text:
-                # Bersihkan paragraf agar tidak ada formatting lama yang mengganggu
-                p.text = "" 
+                p.text = "" # Bersihkan baris
                 run = p.add_run(f"Surabaya, {get_indo_date()}")
                 
-                # Enter sekali sebelum TTD
+                # Enter 1: Setelah tanggal ke TTD
                 run.add_break() 
                 run.add_picture(img_file, width=TTD_WIDTH)
                 
-                # Enter sekali sebelum Nama
+                # Enter 2: Setelah TTD ke Nama
                 run.add_break() 
                 run.add_text(f"({expert_name})")
                 
-                # Pengaturan spasi agar mepet
+                # Set spasi baris agar rapat
                 p.paragraph_format.line_spacing = 1.0
                 p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.space_before = Pt(0)
 
-            # LOGIKA B: Hapus total paragraf '(Tt Expert Judgement)'
-            if "(Tt Expert Judgement)" in p.text:
-                # Menghapus elemen paragraf secara permanen dari dokumen
-                p_element = p._element
-                p_element.getparent().remove(p_element)
+            # LOGIKA B: Hapus baris '(Tt Expert Judgement)' secara aman
+            elif "(Tt Expert Judgement)" in p.text:
+                try:
+                    p_element = p._element
+                    parent = p_element.getparent()
+                    if parent is not None:
+                        parent.remove(p_element)
+                except Exception:
+                    # Jika gagal hapus permanen, kita kosongkan saja teks & spasinya
+                    p.text = ""
+                    p.paragraph_format.line_spacing = Pt(1)
+                    p.paragraph_format.space_after = Pt(0)
+                    p.paragraph_format.space_before = Pt(0)
 
-        # 3. Download
+            # LOGIKA C: Hapus 'Enter' liar atau baris kosong di area tanda tangan
+            # Ini untuk menangani spasi sisa yang kamu keluhkan
+            elif p.text.strip() == "" and "(Tt Expert Judgement)" not in p.text:
+                # Jika baris benar-benar kosong, kita ciutkan ukurannya jadi nol
+                p.paragraph_format.line_spacing = Pt(1)
+                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.space_before = Pt(0)
+
+        # 3. Simpan dan Download
         target_stream = io.BytesIO()
         doc.save(target_stream)
         
-        st.success("Selesai! Spasi siluman telah dihapus.")
+        st.success("Berhasil! Jarak dan spasi sudah dikoreksi.")
         st.download_button(
             label="Download Hasil Final",
             data=target_stream.getvalue(),
