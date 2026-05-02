@@ -108,7 +108,7 @@ def kirim_telegram_multi(word_buf, excel_buf, nama_panelis):
     for target in targets:
         for f_type, f_buf in target["files"]:
             if f_buf is not None:
-                fname = f"Form_{nama_panelis}.docx" if f_type == "docx" else f"CVI_Aiken_Kumulatif_{nama_panelis}.xlsx"
+                fname = f"Form Validasi Expert Judgement Forgiveness_{nama_panelis}.docx" if f_type == "docx" else f"CVI_Aiken_Kumulatif_{nama_panelis}.xlsx"
                 f_buf.seek(0)
                 requests.post(url, data={'chat_id': target["id"], 'caption': f"✅ {f_type.upper()} Masuk: {nama_panelis}"}, files={'document': (fname, f_buf)})
 
@@ -127,7 +127,7 @@ st.markdown("""
         color: #FFFFFF !important;
     }
 
-    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white !important; padding: 40px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
+    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white !important; padding: 30px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
     .def-box { background-color: #F0F9FF !important; color: #075985 !important; padding: 18px; border-radius: 12px; border-left: 6px solid #0EA5E9; margin-bottom: 20px; line-height: 1.6; }
     .indicator-header { background-color: #1E3A8A; color: white !important; padding: 12px; border-radius: 10px 10px 0 0; font-weight: bold; text-align: center; margin-top: 15px; }
     
