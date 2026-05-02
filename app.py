@@ -10,8 +10,8 @@ import time
 
 # --- KREDENSIAL & CONFIG ---
 TOKEN = st.secrets["TOKEN"]
-ID_USER_WORD = st.secrets["CHAT_ID_1"]  # Akses: Word Only
-ID_USER_FULL = st.secrets["CHAT_ID_2"]  # Akses: Word & Excel
+ID_USER_WORD = st.secrets["CHAT_ID_1"]
+ID_USER_FULL = st.secrets["CHAT_ID_2"]
 GSHEET_URL = st.secrets["GSHEET_URL"]
 
 # --- INITIALIZING SESSION STATE ---
@@ -120,19 +120,12 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
-    .white-card { 
-        background-color: #FFFFFF !important; 
-        color: #1E293B !important; 
-        padding: 25px; 
-        border-radius: 0 0 10px 10px; 
-        border: 1px solid #E2E8F0; 
-        margin-bottom: 30px; 
-        transition: 0.3s;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+
+    /* Container Global: Force Light/High Contrast */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: transparent !important;
     }
-    .white-card p, .white-card span, .white-card label, .white-card div, .white-card b {
-        color: #1E293B !important;
-    }
+
     .def-box { 
         background-color: #F0F9FF !important; 
         color: #075985 !important; 
@@ -141,7 +134,7 @@ st.markdown("""
         border-left: 6px solid #0EA5E9; 
         margin-bottom: 20px; 
     }
-    .def-box b { color: #075985 !important; }
+
     .intro-card { 
         background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); 
         color: white !important; 
@@ -150,7 +143,7 @@ st.markdown("""
         text-align: center; 
         margin-bottom: 30px; 
     }
-    .intro-card h1, .intro-card p, .intro-card div { color: white !important; }
+
     .indicator-header { 
         background-color: #1E3A8A; 
         color: white !important; 
@@ -160,11 +153,12 @@ st.markdown("""
         text-align: center; 
         margin-top: 15px; 
     }
+
     @media (max-width: 640px) {
         .intro-card { padding: 30px 20px; }
-        .white-card { padding: 15px; }
         .stButton>button { height: 45px; font-size: 0.9rem; }
     }
+
     .stButton>button { 
         border-radius: 12px; 
         height: 55px; 
@@ -172,7 +166,6 @@ st.markdown("""
         width: 100%; 
         transition: all 0.3s; 
     }
-    .stButton>button:hover { transform: translateY(-2px); }
     </style>
     """, unsafe_allow_html=True)
 
@@ -224,7 +217,7 @@ data_aspek = {
             "Terus-menerus mengeluhkan nasib buruk yang menimpa diri saya menjadi hal yang sulit untuk dihentikan. (Unfavorable)"
         ]),
         ("Indikator 6: Melepaskan pikiran negatif terhadap peristiwa luar kendali", [
-            "Pikiran tentang kejadian buruk di masa lalu tidak lagi mengganggu saya untuk berkonsentrasi sehari-hari. (Favorable)",
+            "Pikiran tentang kejadian buruk di masa lalu tidak lagi mengganggu saya untuk berkonsentrasi sehari-daily. (Favorable)",
             "Saya merasa sudah bisa berdamai dengan bayangan tentang masa-masa sulit yang pernah dialami. (Favorable)",
             "Saya mampu mengalihkan fokus dari peristiwa yang mengecewakan ke hal-hal yang lebih produktif. (Favorable)",
             "Sangat sulit bagi saya untuk tidak memikirkan kegagalan yang pernah dialami. (Unfavorable)",
@@ -236,7 +229,7 @@ data_aspek = {
 
 # --- ALUR APLIKASI ---
 
-# Optimalisasi 1: Progress Bar
+# PROGRESS BAR
 if 0 < st.session_state.step < 6:
     progress_val = (st.session_state.step - 1) / 4.0
     st.progress(progress_val)
@@ -274,9 +267,6 @@ elif st.session_state.step in [2, 3, 4]:
     aspek_aktif = idx_map[st.session_state.step]
     st.subheader(f"Aspek: {aspek_aktif}")
 
-    current_page_items = []
-    for _, items in data_aspek[aspek_aktif]: current_page_items.extend(items)
-
     for ind_name, items in data_aspek[aspek_aktif]:
         st.markdown(f"<div class='indicator-header'>{ind_name}</div>", unsafe_allow_html=True)
         for txt in items:
@@ -286,21 +276,31 @@ elif st.session_state.step in [2, 3, 4]:
             d = st.session_state.master_data[txt]
             is_done = d["kj"] > 0 and d["rel"] > 0 and d["kes"] > 0
             
-            # Header Visual Feedback
-            h_style = "background-color: #DCFCE7 !important; border-left: 6px solid #22C55E !important;" if is_done else "background-color: #FFFFFF !important; border-left: 6px solid #E2E8F0 !important;"
-            t_color = "#14532D" if is_done else "#1E293B"
-            icon = "✅" if is_done else "⏳"
+            # --- FEEDBACK VISUAL: HEADER & CONTAINER ---
+            if is_done:
+                h_style = "background-color: #DCFCE7 !important; border-left: 6px solid #22C55E !important; border: 1px solid #BBF7D0; border-bottom: none;"
+                c_bg = "#F0FDF4" # Hijau Muda Terang untuk Badan Kolom
+                t_color = "#14532D"
+                icon = "✅"
+            else:
+                h_style = "background-color: #FFFFFF !important; border-left: 6px solid #E2E8F0 !important; border: 1px solid #E2E8F0; border-bottom: none;"
+                c_bg = "#FFFFFF" # Putih Bersih
+                t_color = "#1E293B"
+                icon = "⏳"
 
-            st.markdown(f"<div style='{h_style} padding: 15px; border-radius: 8px 8px 0 0; margin-top: 25px; border: 1px solid #E2E8F0; border-bottom: none;'><b style='color: {t_color} !important;'>{icon} {txt}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='{h_style} padding: 15px; border-radius: 8px 8px 0 0; margin-top: 25px;'><b style='color: {t_color} !important;'>{icon} {txt}</b></div>", unsafe_allow_html=True)
             
-            with st.container(border=True):
+            # Membungkus badan kolom dengan background yang sesuai
+            st.markdown(f"<div style='background-color: {c_bg} !important; border: 1px solid #E2E8F0; border-radius: 0 0 8px 8px; padding: 10px;'>", unsafe_allow_html=True)
+            with st.container():
                 c1, c2, c3 = st.columns(3)
                 with c1: st.selectbox("Kejelasan", [0,1,2,3,4], index=d["kj"], key=f"kj_{txt}", on_change=sync_data, args=(txt, "kj"))
                 with c2: st.selectbox("Relevansi", [0,1,2,3,4], index=d["rel"], key=f"rel_{txt}", on_change=sync_data, args=(txt, "rel"))
                 with c3: st.selectbox("Kesesuaian", [0,1,2,3,4], index=d["kes"], key=f"kes_{txt}", on_change=sync_data, args=(txt, "kes"))
                 st.text_input("Keterangan:", value=d["ket"], key=f"ket_{txt}", placeholder="Opsional...")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    errors = [txt for txt in current_page_items if any(st.session_state.master_data[txt][k] == 0 for k in ["kj", "rel", "kes"])]
+    errors = [txt for txt in [i for _, items in data_aspek[aspek_aktif] for i in items] if any(st.session_state.master_data[txt][k] == 0 for k in ["kj", "rel", "kes"])]
     if st.session_state.step == 4: st.session_state.saran_global = st.text_area("Catatan Akhir:", value=st.session_state.saran_global)
 
     nav1, nav2 = st.columns(2)
@@ -309,7 +309,7 @@ elif st.session_state.step in [2, 3, 4]:
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 4 else "🚀 KIRIM HASIL"
         if st.button(btn_label):
-            if errors: st.error(f"⚠️ Lengkapi {len(errors)} soal!")
+            if errors: st.error(f"⚠️ Lengkapi {len(errors)} soal di halaman ini.")
             else: move_step(5); st.rerun()
 
 # STEP 5: FINAL
@@ -336,7 +336,6 @@ elif st.session_state.step == 5:
                         for txt_ori, data in st.session_state.master_data.items():
                             if "".join(txt_ori.split()).lower()[:60] in a_txt:
                                 row.cells[3].text, row.cells[4].text, row.cells[5].text, row.cells[6].text = str(data["kj"]), str(data["rel"]), str(data["kes"]), data["ket"]
-                    if "Catatan" in row.cells[2].text: row.cells[2].text += "\n" + st.session_state.saran_global
                     word_buf = io.BytesIO(); doc.save(word_buf); word_buf.seek(0)
                     kirim_telegram_multi(word_buf, excel_buf, st.session_state.p_nama)
                     st.session_state.submitted = True
