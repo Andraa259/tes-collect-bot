@@ -7,10 +7,10 @@ import gspread
 from google.oauth2.service_account import Credentials
 from streamlit_scroll_to_top import scroll_to_here
 
-# --- KREDENSIAL ---
+# --- KREDENSIAL & CONFIG ---
 TOKEN = st.secrets["TOKEN"]
 CHAT_ID = st.secrets["CHAT_ID"]
-GSHEET_URL = st.secrets["GSHEET_URL"] # Pastikan URL ada di secrets
+GSHEET_URL = st.secrets["GSHEET_URL"]
 
 # --- INITIALIZING SESSION STATE ---
 if 'step' not in st.session_state:
@@ -39,95 +39,102 @@ def move_step(step_num):
 
 def kirim_ke_telegram(file_stream, nama_panelis, format_file):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    filename = f'Form_{nama_panelis}.docx' if format_file == "docx" else f'CVI_{nama_panelis}.xlsx'
+    filename = f'Form_{nama_panelis}.docx' if format_file == "docx" else f'CVI_Aiken_Kumulatif_{nama_panelis}.xlsx'
     files = {'document': (filename, file_stream)}
     payload = {'chat_id': CHAT_ID, 'caption': f"✅ Data {format_file.upper()} Masuk: {nama_panelis}"}
     return requests.post(url, data=payload, files=files)
 
-# --- FUNGSI GOOGLE SHEETS (WRITE VIA URL & CEK C4-C33) ---
+# --- FUNGSI HELPER: KONEKSI GSHEETS ---
+def get_gsheet_client():
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+    return gspread.authorize(creds)
+
+# --- FUNGSI SIMPAN KE GSHEETS (PER KATEGORI, CEK C4-C33, TANPA PEKERJAAN) ---
 def simpan_ke_gsheets():
     try:
-        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
-        client = gspread.authorize(creds)
-        sheet = client.open_by_url(GSHEET_URL).sheet1
+        client = get_gsheet_client()
+        ss = client.open_by_url(GSHEET_URL)
         
-        # Ambil data kolom C untuk cek baris kosong
-        col_c = sheet.col_values(3) # Kolom C
-        
-        target_row = 4
-        # Cari baris kosong di rentang 4-33
-        for r in range(4, 34):
-            if r > len(col_c) or not col_c[r-1]:
-                target_row = r
-                break
-            target_row = r + 1
+        # Mapping nama sheet GSheets ke key data di master_data
+        kategori_map = {
+            "KEJELASAN": "kj",
+            "RELEVANSI": "rel",
+            "KESESUAIAN": "kes"
+        }
 
-        if target_row > 33:
-            raise Exception("Slot Panelis di Google Sheets sudah penuh (Maksimal Baris 33).")
-
-        # Susun Data: Nama (B), Skor... (C-AL)
-        identitas = f"{st.session_state.p_nama} ({st.session_state.p_kerja})"
-        skor_kj = []
-        for aspek in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
-            for _, items in data_aspek[aspek]:
-                for txt in items:
-                    d = st.session_state.master_data.get(txt, {"kj": 0})
-                    skor_kj.append(d["kj"])
-        
-        # Write ke baris yang ditemukan
-        sheet.update_cell(target_row, 2, identitas) # Kolom B
-        # Update skor secara horizontal mulai kolom C
-        cells = sheet.range(target_row, 3, target_row, 3 + len(skor_kj) - 1)
-        for i, val in enumerate(skor_kj):
-            cells[i].value = val
-        sheet.update_cells(cells)
-        
-        print(f"LOG: Berhasil menulis ke GSheets baris {target_row}")
-        return True
-    except Exception as e:
-        print(f"ERROR GSHEETS: {str(e)}")
-        st.error(f"Gagal menulis ke Google Sheets: {e}")
-        return False
-
-# --- FUNGSI EXCEL (TIMPA & ISI C4-C33) ---
-def proses_excel_cvi():
-    try:
-        wb = openpyxl.load_workbook("CVI Aiken Zuyy.xlsx")
-        skor_final = {"KEJELASAN": [], "RELEVANSI": [], "KESESUAIAN": []}
-        
-        for asp in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
-            for _, items in data_aspek[asp]:
-                for txt in items:
-                    d = st.session_state.master_data.get(txt, {"kj": 0, "rel": 0, "kes": 0})
-                    skor_final["KEJELASAN"].append(d["kj"])
-                    skor_final["RELEVANSI"].append(d["rel"])
-                    skor_final["KESESUAIAN"].append(d["kes"])
-
-        for s_name in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
-            ws = wb[s_name]
-            data_list = skor_final[s_name]
+        for sheet_name, key_data in kategori_map.items():
+            ws = ss.worksheet(sheet_name)
+            col_c = ws.col_values(3) # Cek isi kolom C untuk cari baris kosong
             
             target_row = 4
-            while target_row <= 33:
-                if ws.cell(row=target_row, column=3).value is None:
+            for r in range(4, 34): # Range C4 sampai C33
+                if r > len(col_c) or not col_c[r-1]:
+                    target_row = r
                     break
-                target_row += 1
+                target_row = r + 1
             
             if target_row <= 33:
-                identitas = f"{st.session_state.p_nama} ({st.session_state.p_kerja})"
-                ws.cell(row=target_row, column=2, value=identitas)
-                for i, val in enumerate(data_list):
-                    ws.cell(row=target_row, column=3 + i, value=val)
+                # Tulis Nama di Kolom B (Tanpa Pekerjaan)
+                ws.update_cell(target_row, 2, st.session_state.p_nama)
+                
+                # Ambil skor urut 1-36
+                skor_urut = []
+                for aspek in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
+                    for _, items in data_aspek[aspek]:
+                        for txt in items:
+                            val = st.session_state.master_data.get(txt, {key_data: 0})[key_data]
+                            skor_urut.append(val)
+                
+                # Update horizontal mulai Kolom C
+                cells = ws.range(target_row, 3, target_row, 3 + len(skor_urut) - 1)
+                for i, score in enumerate(skor_urut):
+                    cells[i].value = score
+                ws.update_cells(cells)
+            else:
+                print(f"TERMINAL LOG: Sheet {sheet_name} sudah penuh (baris 33 reached).")
+                
+        return True
+    except Exception as e:
+        print(f"TERMINAL ERROR GSHEETS: {str(e)}")
+        st.error(f"GSheets Write Error: {e}")
+        return False
+
+# --- FUNGSI EXCEL KUMULATIF (SINRON DARI GSHEETS) ---
+def proses_excel_cvi():
+    try:
+        client = get_gsheet_client()
+        ss = client.open_by_url(GSHEET_URL)
+        wb = openpyxl.load_workbook("CVI Aiken Zuyy.xlsx")
+        
+        for sheet_name in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
+            ws_gs = ss.worksheet(sheet_name)
+            all_vals = ws_gs.get_all_values()
+            ws_xl = wb[sheet_name]
+            
+            # Ambil data dari GSheets mulai baris 4
+            for idx, row_data in enumerate(all_vals[3:]): # Index 3 adalah baris 4
+                target_row = 4 + idx
+                if target_row > 33 or not row_data[2]: # Berhenti jika baris > 33 atau kolom C kosong
+                    break
+                
+                # Tulis Nama ke Excel (Kolom B)
+                ws_xl.cell(row=target_row, column=2, value=row_data[1])
+                
+                # Tulis Skor ke Excel (Kolom C dst)
+                for col_idx, val in enumerate(row_data[2:38]): # Ambil item 1-36
+                    try:
+                        ws_xl.cell(row=target_row, column=3 + col_idx, value=int(float(val)))
+                    except:
+                        ws_xl.cell(row=target_row, column=3 + col_idx, value=0)
         
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)
-        print(f"LOG: Excel berhasil diproses.")
         return buf
     except Exception as e:
-        print(f"ERROR EXCEL: {str(e)}")
-        st.error(f"Gagal memproses Excel: {e}")
+        print(f"TERMINAL ERROR EXCEL: {str(e)}")
+        st.error(f"Excel Processing Error: {e}")
         return None
 
 # --- UI STYLING ---
@@ -279,17 +286,17 @@ elif st.session_state.step in [1, 2, 3]:
 elif st.session_state.step == 4:
     st.title("Sedang Memproses...")
     if not st.session_state.submitted:
-        with st.spinner("Menyimpan data & Mengirim Dokumen..."):
+        with st.spinner("Sedang memproses database dan dokumen..."):
             try:
-                # 1. Simpan ke Database GSheets via URL
+                # 1. Simpan ke GSheets (Per Kategori)
                 simpan_ke_gsheets()
 
-                # 2. Proses Excel Tabel
+                # 2. Proses Excel Kumulatif (Sinkron GSheets)
                 excel_buf = proses_excel_cvi()
                 if excel_buf:
                     kirim_ke_telegram(excel_buf, st.session_state.p_nama, "xlsx")
 
-                # 3. Proses Word
+                # 3. Proses Word (Tetap kirim detail Nama & Pekerjaan)
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
                 for p in doc.paragraphs:
                     if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
@@ -318,8 +325,8 @@ elif st.session_state.step == 4:
                 st.session_state.submitted = True
                 move_step(5); st.rerun()
             except Exception as e:
+                print(f"TERMINAL ERROR: {str(e)}")
                 st.error(f"Terjadi kesalahan teknis: {e}")
-                print(f"TERMINAL ERROR: {str(e)}") # Tertulis di terminal/log
                 if st.button("Kembali ke Penilaian"): move_step(3); st.rerun()
     else:
         move_step(5); st.rerun()
