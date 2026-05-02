@@ -42,9 +42,10 @@ def move_step(step_num):
     st.session_state.scroll_to_top = True
     st.session_state.step = step_num
 
-def sync_data(txt, key_type):
-    # Memaksa sinkronisasi dari widget key ke master_data secara instan
-    st.session_state.master_data[txt][key_type] = st.session_state[f"{key_type}_{txt}"]
+# --- 1. DEFINISI CALLBACK (Pastikan ini ada di bagian atas kode/luar loop) ---
+    def sync_data(txt, key_type):
+        # Memastikan data di master_data update SEBELUM rerun render header
+        st.session_state.master_data[txt][key_type] = st.session_state[f"{key_type}_{txt}"]
 
 def kirim_telegram_multi(word_buf, excel_buf, nama_panelis):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
@@ -267,6 +268,8 @@ elif st.session_state.step in [2, 3, 4]:
     aspek_aktif = idx_map[st.session_state.step]
     st.subheader(f"Aspek: {aspek_aktif}")
 
+
+    # --- 2. LOOP PENILAIAN ---
     for ind_name, items in data_aspek[aspek_aktif]:
         st.markdown(f"<div class='indicator-header'>{ind_name}</div>", unsafe_allow_html=True)
         for txt in items:
@@ -274,31 +277,55 @@ elif st.session_state.step in [2, 3, 4]:
                 st.session_state.master_data[txt] = {"kj": 0, "rel": 0, "kes": 0, "ket": ""}
             
             d = st.session_state.master_data[txt]
+            # Logika deteksi selesai
             is_done = d["kj"] > 0 and d["rel"] > 0 and d["kes"] > 0
             
-            # --- FEEDBACK VISUAL: HEADER & CONTAINER ---
+            # --- PENGATURAN WARNA DINAMIS ---
             if is_done:
-                h_style = "background-color: #DCFCE7 !important; border-left: 6px solid #22C55E !important; border: 1px solid #BBF7D0; border-bottom: none;"
-                c_bg = "#F0FDF4" # Hijau Muda Terang untuk Badan Kolom
+                h_style = "background-color: #DCFCE7; border-left: 6px solid #22C55E; border: 1px solid #BBF7D0; border-bottom: none;"
+                b_style = "background-color: #F0FDF4; border-left: 6px solid #22C55E; border: 1px solid #BBF7D0; border-top: none;"
                 t_color = "#14532D"
                 icon = "✅"
             else:
-                h_style = "background-color: #FFFFFF !important; border-left: 6px solid #E2E8F0 !important; border: 1px solid #E2E8F0; border-bottom: none;"
-                c_bg = "#FFFFFF" # Putih Bersih
+                h_style = "background-color: #FFFFFF; border-left: 6px solid #E2E8F0; border: 1px solid #E2E8F0; border-bottom: none;"
+                b_style = "background-color: #FFFFFF; border-left: 6px solid #E2E8F0; border: 1px solid #E2E8F0; border-top: none;"
                 t_color = "#1E293B"
                 icon = "⏳"
 
-            st.markdown(f"<div style='{h_style} padding: 15px; border-radius: 8px 8px 0 0; margin-top: 25px;'><b style='color: {t_color} !important;'>{icon} {txt}</b></div>", unsafe_allow_html=True)
+            # 1. Render Header HTML
+            st.markdown(f"""
+                <div style='{h_style} padding: 15px; border-radius: 8px 8px 0 0; margin-top: 20px;'>
+                    <b style='color: {t_color} !important;'>{icon} {txt}</b>
+                </div>
+            """, unsafe_allow_html=True)
             
-            # Membungkus badan kolom dengan background yang sesuai
-            st.markdown(f"<div style='background-color: {c_bg} !important; border: 1px solid #E2E8F0; border-radius: 0 0 8px 8px; padding: 10px;'>", unsafe_allow_html=True)
-            with st.container():
-                c1, c2, c3 = st.columns(3)
-                with c1: st.selectbox("Kejelasan", [0,1,2,3,4], index=d["kj"], key=f"kj_{txt}", on_change=sync_data, args=(txt, "kj"))
-                with c2: st.selectbox("Relevansi", [0,1,2,3,4], index=d["rel"], key=f"rel_{txt}", on_change=sync_data, args=(txt, "rel"))
-                with c3: st.selectbox("Kesesuaian", [0,1,2,3,4], index=d["kes"], key=f"kes_{txt}", on_change=sync_data, args=(txt, "kes"))
-                st.text_input("Keterangan:", value=d["ket"], key=f"ket_{txt}", placeholder="Opsional...")
-            st.markdown("</div>", unsafe_allow_html=True)
+            # 2. Render Badan Kolom (Wrapper HTML + Widget Streamlit)
+            # Kita bungkus widget di dalam div yang warnanya dinamis
+            st.markdown(f"<div style='{b_style} padding: 10px 20px; border-radius: 0 0 8px 8px;'>", unsafe_allow_html=True)
+            
+            c1, c2, c3 = st.columns(3)
+            with c1: 
+                st.selectbox("Kejelasan", [0,1,2,3,4], 
+                             index=st.session_state.master_data[txt]["kj"], 
+                             key=f"kj_{txt}", 
+                             on_change=sync_data, args=(txt, "kj"))
+            with c2: 
+                st.selectbox("Relevansi", [0,1,2,3,4], 
+                             index=st.session_state.master_data[txt]["rel"], 
+                             key=f"rel_{txt}", 
+                             on_change=sync_data, args=(txt, "rel"))
+            with c3: 
+                st.selectbox("Kesesuaian", [0,1,2,3,4], 
+                             index=st.session_state.master_data[txt]["kes"], 
+                             key=f"kes_{txt}", 
+                             on_change=sync_data, args=(txt, "kes"))
+            
+            st.text_input("Keterangan per Aitem:", 
+                          value=st.session_state.master_data[txt]["ket"], 
+                          key=f"ket_{txt}", 
+                          placeholder="Tambahkan saran jika ada...")
+            
+            st.markdown("</div>", unsafe_allow_html=True) # Tutup badan kolom
 
     errors = [txt for txt in [i for _, items in data_aspek[aspek_aktif] for i in items] if any(st.session_state.master_data[txt][k] == 0 for k in ["kj", "rel", "kes"])]
     if st.session_state.step == 4: st.session_state.saran_global = st.text_area("Catatan Akhir:", value=st.session_state.saran_global)
