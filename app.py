@@ -25,8 +25,8 @@ if 'p_nama' not in st.session_state:
     st.session_state.p_nama = ""
 if 'p_kerja' not in st.session_state:
     st.session_state.p_kerja = ""
-if 'saran_global' not in st.session_state:
-    st.session_state.saran_global = ""
+if 's_global' not in st.session_state:
+    st.session_state.s_global = ""
 if 'submitted' not in st.session_state:
     st.session_state.submitted = False
 if 'confirmed' not in st.session_state: 
@@ -42,7 +42,7 @@ def move_step(step_num):
     st.session_state.step = step_num
 
 def sync_data(txt, key_type):
-    # Sinkronisasi instan agar warna box langsung berubah saat diklik
+    # Sinkronisasi agar visual feedback langsung berubah tanpa delay
     st.session_state.master_data[txt][key_type] = st.session_state[f"{key_type}_{txt}"]
 
 # --- FUNGSI INTEGRASI ---
@@ -110,17 +110,33 @@ def kirim_telegram_multi(word_buf, excel_buf, nama_panelis):
                 f_buf.seek(0)
                 requests.post(url, data={'chat_id': target["id"], 'caption': f"✅ {f_type.upper()} Masuk: {nama_panelis}"}, files={'document': (fname, f_buf)})
 
-# --- UI STYLING ---
+# --- UI STYLING (The Fix: Forced High-Contrast) ---
 st.set_page_config(page_title="Expert Judgement", layout="centered")
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
+    
+    /* Paksa teks di area input agar selalu GELAP tajam */
+    label, p, span, b, .stSelectbox p, .stTextInput label {
+        color: #0F172A !important;
+        font-weight: 500;
+    }
 
-    .def-box { background-color: #F0F9FF !important; color: #075985 !important; padding: 18px; border-radius: 12px; border-left: 6px solid #0EA5E9; margin-bottom: 20px; }
-    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white !important; padding: 60px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
-    .indicator-header { background-color: #1E3A8A; color: white !important; padding: 12px; border-radius: 10px 10px 0 0; font-weight: bold; text-align: center; margin-top: 15px; }
-    .stButton>button { border-radius: 12px; height: 55px; font-weight: bold; width: 100%; }
+    /* Override khusus teks di Intro & Header Indikator agar tetap PUTIH */
+    .intro-card *, .indicator-header, .stButton button, .intro-card div, .intro-card b {
+        color: #FFFFFF !important;
+    }
+
+    .def-box { background-color: #E0F2FE !important; color: #0369A1 !important; padding: 18px; border-radius: 12px; border-left: 8px solid #0EA5E9; margin-bottom: 20px; }
+    .def-box b { color: #0369A1 !important; }
+
+    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); padding: 60px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
+    .indicator-header { background-color: #1E3A8A; padding: 12px; border-radius: 10px 10px 0 0; font-weight: bold; text-align: center; margin-top: 15px; }
+    
+    .stButton>button { background: #1E3A8A !important; border-radius: 12px; height: 55px; font-weight: bold; width: 100%; transition: 0.3s; }
+    .stButton>button:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
+    
     .thanks-card { text-align: center; padding: 40px; background-color: #F8FAFC !important; border-radius: 20px; border: 1px solid #E2E8F0; margin-top: 50px; }
     </style>
     """, unsafe_allow_html=True)
@@ -189,12 +205,12 @@ if 0 < st.session_state.step < 6:
     st.progress((st.session_state.step - 1) / 5.0)
 
 if st.session_state.step == 0:
-    st.markdown("<div class='intro-card'><h1>Expert Judgement Portal</h1><p>Forgiveness Scale Development</p><div style='margin-top:20px; font-weight:bold;'>WELCOME</div></div>", unsafe_allow_html=True)
+    st.markdown("<div class='intro-card'><h1>Expert Judgement Portal</h1><p>Forgiveness Scale Development</p><div style='margin-top:20px; font-weight:bold; letter-spacing:2px;'>WELCOME</div></div>", unsafe_allow_html=True)
     if st.button("Masuk Ke Pengisian ➔"): move_step(1); st.rerun()
 
 elif st.session_state.step == 1:
     st.title("⚖️ Form Validasi")
-    st.markdown("<div class='def-box'><b>Definisi Operasional:</b><br>Pemaafan adalah kemampuan individual dalam membingkai ulang kesalahan...</div>", unsafe_allow_html=True)
+    st.markdown("<div class='def-box'><b>Definisi Operasional:</b><br>Pemaafan adalah kemampuan individual dalam membingkai ulang terhadap suatu kesalahan yang dialami/dirasakan...</div>", unsafe_allow_html=True)
     st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
     st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
     if st.button("Mulai Penilaian 🚀"):
@@ -215,21 +231,21 @@ elif st.session_state.step in [2, 3, 4]:
             d = st.session_state.master_data[txt]
             is_done = d["kj"] > 0 and d["rel"] > 0 and d["kes"] > 0
             
-            # --- TAMPILAN BOX AWAL & BOX SELESAI ---
+            # --- THE FIX: WARNA BOX & TEKS ---
             if is_done:
-                # Hijau Emerald (High Contrast)
-                h_style = "background-color: #D1FAE5; border-left: 6px solid #10B981; border: 1px solid #A7F3D0; border-bottom: none;"
-                b_style = "background-color: #ECFDF5; border-left: 6px solid #10B981; border: 1px solid #A7F3D0; border-top: none;"
-                t_color = "#065F46" # Teks Hijau Tua
+                # Box Hijau Emerald (Teks Hijau Tua Pekat)
+                h_style = "background-color: #D1FAE5; border-left: 8px solid #10B981; border: 1px solid #A7F3D0; border-bottom: none;"
+                b_style = "background-color: #ECFDF5; border-left: 8px solid #10B981; border: 1px solid #A7F3D0; border-top: none;"
+                t_color = "#064E3B" 
                 icon = "✅"
             else:
-                # Biru Muda / Abu Lembut (Bukan Putih)
-                h_style = "background-color: #F1F5F9; border-left: 6px solid #CBD5E1; border: 1px solid #E2E8F0; border-bottom: none;"
-                b_style = "background-color: #F8FAFC; border-left: 6px solid #CBD5E1; border: 1px solid #E2E8F0; border-top: none;"
-                t_color = "#1E3A8A" # Teks Biru Navy
+                # Box Slate Gray/Blue (Teks Biru Navy Pekat)
+                h_style = "background-color: #F1F5F9; border-left: 8px solid #94A3B8; border: 1px solid #E2E8F0; border-bottom: none;"
+                b_style = "background-color: #F8FAFC; border-left: 8px solid #94A3B8; border: 1px solid #E2E8F0; border-top: none;"
+                t_color = "#0F172A" 
                 icon = "⏳"
 
-            st.markdown(f"<div style='{h_style} padding: 15px; border-radius: 8px 8px 0 0; margin-top: 25px;'><b style='color: {t_color} !important;'>{icon} {txt}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='{h_style} padding: 15px; border-radius: 8px 8px 0 0; margin-top: 25px;'><b style='color: {t_color} !important; font-size: 1.1rem;'>{icon} {txt}</b></div>", unsafe_allow_html=True)
             st.markdown(f"<div style='{b_style} padding: 10px 20px; border-radius: 0 0 8px 8px;'>", unsafe_allow_html=True)
             c1, c2, c3 = st.columns(3)
             with c1: st.selectbox("Kejelasan", [0,1,2,3,4], index=d["kj"], key=f"kj_{txt}", on_change=sync_data, args=(txt, "kj"))
@@ -240,22 +256,23 @@ elif st.session_state.step in [2, 3, 4]:
 
     items_pg = [t for _, items in data_aspek[aspek_aktif] for t in items]
     errors = [t for t in items_pg if any(st.session_state.master_data[t][k] == 0 for k in ["kj", "rel", "kes"])]
-    if st.session_state.step == 4: st.session_state.saran_global = st.text_area("Catatan/Saran Keseluruhan:", value=st.session_state.saran_global)
+    if st.session_state.step == 4: st.session_state.s_global = st.text_area("Catatan Akhir:", value=st.session_state.s_global)
 
     n1, n2 = st.columns(2)
     with n1: 
         if st.button("⬅️ Kembali"): move_step(st.session_state.step - 1); st.rerun()
     with n2:
-        if st.button("Lanjut ➡️" if st.session_state.step < 4 else "🚀 KIRIM HASIL"):
+        btn_txt = "Lanjut ➡️" if st.session_state.step < 4 else "🚀 KIRIM HASIL"
+        if st.button(btn_txt):
             if errors: st.error(f"⚠️ Lengkapi {len(errors)} soal!")
             else: move_step(5); st.rerun()
 
 elif st.session_state.step == 5:
-    st.title("Konfirmasi")
-    st.warning("Data tidak dapat diubah setelah dikirim.")
+    st.subheader("Konfirmasi")
+    st.warning("Mohon periksa kembali. Data tidak dapat diubah setelah dikirim.")
     st.session_state.confirmed = st.checkbox("Saya menyatakan data sudah benar.")
     if st.button("🚀 YA, KIRIM SEKARANG", disabled=not st.session_state.confirmed):
-        with st.spinner("Memproses data..."):
+        with st.spinner("Memproses..."):
             try:
                 simpan_ke_gsheets(); excel_buf = proses_excel_cvi()
                 doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
@@ -268,7 +285,6 @@ elif st.session_state.step == 5:
                     for t_ori, d_item in st.session_state.master_data.items():
                         if "".join(t_ori.split()).lower()[:60] in a_txt:
                             row.cells[3].text, row.cells[4].text, row.cells[5].text, row.cells[6].text = str(d_item["kj"]), str(d_item["rel"]), str(d_item["kes"]), d_item["ket"]
-                if "Catatan" in row.cells[2].text: row.cells[2].text += "\n" + st.session_state.saran_global
                 word_buf = io.BytesIO(); doc.save(word_buf); word_buf.seek(0)
                 kirim_telegram_multi(word_buf, excel_buf, st.session_state.p_nama)
                 st.session_state.submitted = True; move_step(6); st.rerun()
