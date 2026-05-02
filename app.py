@@ -11,8 +11,8 @@ import time
 # --- KREDENSIAL & CONFIG ---
 TOKEN = st.secrets["TOKEN"]
 # Menggunakan CHAT_ID asli dari kodemu, namun mendukung sistem Dual ID jika ada di secrets
-ID_USER_WORD = st.secrets.get("CHAT_ID_1", st.secrets["CHAT_ID"]) 
-ID_USER_FULL = st.secrets.get("CHAT_ID_2", st.secrets["CHAT_ID"])
+ID_USER_WORD = st.secrets.get("CHAT_ID_1") 
+ID_USER_FULL = st.secrets.get("CHAT_ID_2")
 GSHEET_URL = st.secrets["GSHEET_URL"]
 
 # --- INITIALIZING SESSION STATE ---
