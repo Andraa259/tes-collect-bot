@@ -152,7 +152,7 @@ data_aspek = {
         ("Indikator 2: Kesediaan untuk melepaskan pikiran negatif tentang diri", [
             "Pikiran negatif tentang diri sendiri mulai memudar seiring waktu. (Favorable)",
             "Saya dapat memahami diri sendiri atas kesalahan yang telah saya lakukan. (Favorable)",
-            "Saat  ingatan yang mengganggu tentang diri sendiri muncul, saya mampu melepaskannya. (Favorable)",
+            "Saat ingatan yang mengganggu tentang diri sendiri muncul, saya mampu melepaskannya. (Favorable)",
             "Sulit bagi saya untuk berhenti memikirkan hal-hal buruk yang pernah menimpa diri sendiri. (Unfavorable)",
             "Pikiran tentang kesalahan diri sendiri terus muncul walaupun sudah berusaha melupakannya. (Unfavorable)",
             "Saya sering susah berkonsentrasi karena teringat pada kesalahan diri sendiri yang telah lalu. (Unfavorable)"
@@ -311,10 +311,21 @@ elif st.session_state.step == 5:
                         if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
                     table = doc.tables[0]
                     for row in table.rows:
-                        a_word = "".join(row.cells[2].text.split()).lower()
-                        for t_ori, d in st.session_state.master_data.items():
-                            if "".join(t_ori.split()).lower()[:60] in a_word:
-                                row.cells[3].text, row.cells[4].text, row.cells[5].text, row.cells[6].text = str(d["kj"]), str(d["rel"]), str(d["kes"]), d["ket"]
+                        # 1. Ambil teks dari sel Word dan buang SEMUA jenis spasi/whitespace
+text_di_word = "".join(row.cells[2].text.split()).lower()
+
+for t_ori, d in st.session_state.master_data.items():
+    # 2. Ambil teks asli (master) dan buang juga SEMUA jenis spasinya
+    text_master = "".join(t_ori.split()).lower()
+
+    # 3. Bandingkan blok teks tanpa spasi tersebut
+    # Kita gunakan 'in' agar jika di Word ada tambahan nomor urut tetap bisa ketemu
+    if text_master in text_di_word or text_di_word in text_master:
+        row.cells[3].text = str(d["kj"])
+        row.cells[4].text = str(d["rel"])
+        row.cells[5].text = str(d["kes"])
+        row.cells[6].text = d["ket"]
+        break # Berhenti mencari jika sudah ketemu untuk efisiensi
                     if st.session_state.saran_global:
                         for row in table.rows:
                             if "Catatan" in row.cells[2].text: row.cells[2].text += "\n" + st.session_state.saran_global
