@@ -11,13 +11,13 @@ TOKEN = st.secrets["TOKEN"]
 TARGET_CHAT_IDS = [st.secrets["CHAT_ID_1"], st.secrets.get("CHAT_ID_2")] 
 
 DAFTAR_PEKERJAAN = [
-    "Dosen Psikologi",              # Juli
-    "Mahasiswi Psikologi",          # Amelia Nayla
-    "Akademisi",                    # Farah Tazqia
-    "Praktisi Psikologi",           # nilon dharu
-    "Dosen Psikologi",              # Mukhammad Elvino
-    "Peneliti Psikometri",          # Flora Frederica
-    "Mahasiswi Psikologi"           # Jeniffer
+    "Mahasiswa",              # Juli
+    "Mahasiswa Psikologi Semester 4 di Universitas 17 Agustus 1945 Surabaya",          # Amelia Nayla
+    "-",                    # Farah Tazqia
+    "mahasiswa",           # nilon dharu
+    "Mahasiswa",              # Mukhammad Elvino
+    "Mahasiswa",          # Flora Frederica
+    "Mahasiswi"           # Jeniffer
 ]
 
 # --- 2. FUNGSI PENGIRIMAN TELEGRAM ---
