@@ -9,7 +9,7 @@ import openpyxl
 import time
 
 # --- 1. CONFIG ---
-st.set_page_config(page_title="Engineer Master Hybrid v7.14", layout="wide")
+st.set_page_config(page_title="Engineer Master Hybrid v7.15", layout="wide")
 
 TOKEN = st.secrets["TOKEN"]
 ID_USER_WORD = st.secrets.get("CHAT_ID_1") 
@@ -24,6 +24,7 @@ def get_gsheet_client():
     return gspread.authorize(creds)
 
 def find_first_empty_row(ws):
+    """Cek baris kosong di GSheets berdasarkan kolom C (Skor pertama)"""
     col_c = ws.col_values(3) 
     for r in range(4, 34): 
         if r > len(col_c) or not col_c[r-1]:
@@ -31,31 +32,31 @@ def find_first_empty_row(ws):
     return 34
 
 def proses_excel_cvi():
-    """Mengambil data TERBARU dari GSheets dan merakitnya ke file Excel Kumulatif"""
+    """Narik seluruh database dari GSheets dan dimasukin ke template Excel Rekap"""
     try:
         client = get_gsheet_client()
         ss = client.open_by_url(GSHEET_URL)
-        # Pastikan file 'CVI Aiken Zuyy.xlsx' ada di folder project GitHub lo
+        # Pastikan file "CVI Aiken Zuyy.xlsx" ada di repo GitHub lo
         wb = openpyxl.load_workbook("CVI Aiken Zuyy.xlsx")
         
         for s_name in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
             ws_gs = ss.worksheet(s_name)
-            all_vals = ws_gs.get_all_values() # Ambil semua data GSheets
+            all_vals = ws_gs.get_all_values() 
             ws_xl = wb[s_name]
             
-            # Looping mulai baris 4 GSheets (index 3)
+            # Update baris 4 sampai 33 (Total 30 slot penilai)
             for idx, row_data in enumerate(all_vals[3:]):
                 target_row = 4 + idx
                 if target_row > 33 or len(row_data) < 2 or not row_data[1]: 
                     break
                 
-                # Isi Nama ke Kolom B
+                # Nama (Kolom B)
                 ws_xl.cell(row=target_row, column=2, value=row_data[1])
                 
-                # Isi Skor A1-A36 ke Kolom C-AL
+                # Skor A1-A36 (Kolom C-AL)
+                # Ambil data dari index 2 sampai 38 (total 36 kolom)
                 for col_idx, val in enumerate(row_data[2:38]):
                     try:
-                        # Convert ke angka biar Excel bisa ngitung formulanya
                         ws_xl.cell(row=target_row, column=3 + col_idx, value=int(float(val)))
                     except:
                         ws_xl.cell(row=target_row, column=3 + col_idx, value=0)
@@ -65,7 +66,7 @@ def proses_excel_cvi():
         buf.seek(0)
         return buf
     except Exception as e:
-        st.error(f"Gagal generate Excel Kumulatif: {e}")
+        st.error(f"Gagal generate Excel Rekap: {e}")
         return None
 
 def send_tele(chat_id, file_buf, fname, caption):
@@ -75,7 +76,7 @@ def send_tele(chat_id, file_buf, fname, caption):
 
 # --- 3. UI ENGINE ---
 
-st.title("🖥️ MASTER HYBRID v7.14 (CUMULATIVE SYNC)")
+st.title("🖥️ MASTER HYBRID v7.15 (FIX ITEM 36)")
 
 if 'batch_data' not in st.session_state:
     st.session_state.batch_data = None
@@ -96,6 +97,7 @@ if up_file:
                     name = raw_xl.iloc[i, 1] 
                     if pd.isna(name) or str(name).strip() == "": continue
                     
+                    # Logic shifting kolom karena kolom Pekerjaan cuma ada di Kejelasan
                     if s_name == "KEJELASAN":
                         job = raw_xl.iloc[i, 2] 
                         start_skor = 3 
@@ -112,7 +114,7 @@ if up_file:
                 temp_db[s_name] = pd.DataFrame(rows)
             
             st.session_state.batch_data = temp_db
-            st.success("Excel Terbaca! Skor diatur otomatis sesuai struktur sheet.")
+            st.success("Excel Terbaca!")
             st.rerun()
         except Exception as e:
             st.error(f"Error: {e}")
@@ -125,7 +127,6 @@ if st.session_state.batch_data:
         with tab:
             config = {}
             if sheets[i] != "KEJELASAN": config["Pekerjaan"] = None
-            
             st.session_state.batch_data[sheets[i]] = st.data_editor(
                 st.session_state.batch_data[sheets[i]],
                 num_rows="dynamic",
@@ -135,7 +136,7 @@ if st.session_state.batch_data:
 
     if st.button("🚀 EXECUTE SYNC"):
         try:
-            with st.spinner("Processing GSheets & Word..."):
+            with st.spinner("Syncing..."):
                 client = get_gsheet_client()
                 ss = client.open_by_url(GSHEET_URL)
                 w_tmpl = "Form Validasi Expert Judgement Ayinn Ver. 3.docx"
@@ -148,19 +149,19 @@ if st.session_state.batch_data:
                     name = str(db_kj.iloc[idx]["Nama"])
                     job = str(db_kj.iloc[idx]["Pekerjaan"]) 
                     
+                    # 1. Update GSheets
                     for s_name in sheets:
                         ws = ss.worksheet(s_name)
                         target_row = find_first_empty_row(ws)
                         if target_row <= 33:
                             curr_df = st.session_state.batch_data[s_name]
                             skor = [int(curr_df.iloc[idx][f"A{k+1}"]) for k in range(36)]
-                            
                             ws.update_cell(target_row, 2, name)
                             cells = ws.range(target_row, 3, target_row, 3 + len(skor) - 1)
                             for s_idx, v in enumerate(skor): cells[s_idx].value = v
                             ws.update_cells(cells)
 
-                    # Generate Word
+                    # 2. Injeksi Word (FIX LOGIC)
                     doc = Document(w_tmpl)
                     for p in doc.paragraphs:
                         if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {name}"
@@ -168,31 +169,36 @@ if st.session_state.batch_data:
                     
                     if doc.tables:
                         table = doc.tables[0]
-                        a_idx = 0
+                        aitem_pointer = 0
                         skj = [int(db_kj.iloc[idx][f"A{k+1}"]) for k in range(36)]
                         srel = [int(db_rel.iloc[idx][f"A{k+1}"]) for k in range(36)]
                         skes = [int(db_kes.iloc[idx][f"A{k+1}"]) for k in range(36)]
                         
-                        for row in table.rows:
-                            txt_no = row.cells[0].text.strip()
-                            if (txt_no.endswith(".") or txt_no.isdigit()) and a_idx < 36:
-                                row.cells[3].text, row.cells[4].text, row.cells[5].text = str(skj[a_idx]), str(srel[a_idx]), str(skes[a_idx])
-                                a_idx += 1
+                        for row_idx, row in enumerate(table.rows):
+                            # Baris item biasanya punya teks di kolom aitem (index 2)
+                            # Tapi kita cek kolom No (index 0) atau kolom Aitem (index 2) biar pasti
+                            aitem_text = row.cells[2].text.strip()
+                            # Jika kolom No ada isinya (seperti 1, 2, dst) ATAU baris itu keliatan kayak baris aitem
+                            # Kita pakai pengecekan teks aitem yang tidak kosong dan bukan header
+                            if aitem_text and "Aitem Skala" not in aitem_text and "Indikator" not in aitem_text:
+                                if aitem_pointer < 36:
+                                    row.cells[3].text = str(skj[aitem_pointer])
+                                    row.cells[4].text = str(srel[aitem_pointer])
+                                    row.cells[5].text = str(skes[aitem_pointer])
+                                    aitem_pointer += 1
                     
                     word_buf = io.BytesIO(); doc.save(word_buf); word_buf.seek(0)
-                    send_tele(ID_USER_WORD, word_buf, f"Form Validasi Expert Judgement Forgiveness_{name}.docx", f"✅ Word: {name}")
-                    word_buf.seek(0)
-                    send_tele(ID_USER_FULL, word_buf, f"Form Validasi Expert Judgement Forgiveness_{name}.docx", f"✅ Full Log: {name}")
+                    send_tele(ID_USER_WORD, word_buf, f"Form Validasi_{name}.docx", f"✅ Word: {name}")
+                    word_buf.seek(0); send_tele(ID_USER_FULL, word_buf, f"Form Validasi_{name}.docx", f"✅ Full Log: {name}")
 
-                # --- 🎯 BAGIAN PENGIRIMAN EXCEL KUMULATIF ---
+                # 3. KIRIM EXCEL REKAP KUMULATIF KE ADMIN
                 st.write("---")
-                with st.spinner("Meresume GSheets ke Excel Kumulatif..."):
-                    excel_kumulatif = proses_excel_cvi()
-                    if excel_kumulatif:
-                        send_tele(ID_USER_FULL, excel_kumulatif, f"Rekap_CVI_Aiken_Latest_{int(time.time())}.xlsx", "📊 REKAP KUMULATIF SELURUH PANELIS")
-                        st.success("Excel Kumulatif terkirim ke Admin!")
-
-                st.success("Selesai! GSheets terisi & Word terkirim.")
+                with st.spinner("Generating Rekap Aiken Kumulatif..."):
+                    excel_rekap = proses_excel_cvi()
+                    if excel_rekap:
+                        send_tele(ID_USER_FULL, excel_rekap, f"Rekap_Aiken_Kumulatif_{int(time.time())}.xlsx", "📊 REKAP TOTAL (GSheets to Excel)")
+                
+                st.success("Selesai! Word Terkirim & Rekap Kumulatif Terkirim ke Admin.")
                 st.session_state.batch_data = None
         except Exception as e:
             st.error(f"Pipeline Error: {e}")
