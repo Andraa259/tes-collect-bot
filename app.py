@@ -16,7 +16,8 @@ DAFTAR_PEKERJAAN = [
     "mahasiswa",                                                                       # nilon dharu
     "Mahasiswa",                                                                       # Mukhammad Elvino
     "Mahasiswa",                                                                       # Flora Frederica
-    "Mahasiswi"                                                                        # Jeniffer
+    "Mahasiswi",   # Jeniffer
+    "Mahasiswi"
 ]
 
 # Array Catatan Akhir (Hanya Amelia dan Nilon yang ada isinya)
@@ -27,7 +28,13 @@ DAFTAR_CATATAN = [
     "cukup jelas dan baik",   # nilon dharu (Ada isi)
     "",                                      # Mukhammad Elvino (Kosong)
     "",                                      # Flora Frederica (Kosong)
-    ""                                       # Jeniffer (Kosong)
+    "",      # Jeniffer (Kosong)
+    ""
+]
+
+DAFTAR_KETERANGAN_ITEM = [
+    {}, {}, {}, {}, {}, {}, {}, # Panelis 1-7 kosong
+    {11: 'kata "konsentrasi" bisa diubah menjadi "fokus"'} # Isi Keterangan Panelis 8
 ]
 
 # --- 2. FUNGSI PENGIRIMAN TELEGRAM ---
@@ -65,66 +72,72 @@ def proses_batch_dan_kirim(file_excel, template_word):
     combined_data = {}
 
     try:
-        # Ekstraksi Data Excel
+        # Ekstraksi Data Excel (Membaca 8 baris untuk 8 panelis)
         for sheet_name, key_code in sheets.items():
             df = pd.read_excel(file_excel, sheet_name=sheet_name, header=None)
-            for row_idx in range(3, 10):
+            for row_idx in range(3, 11): # Mengambil baris 4 sampai 11
                 nama_raw = str(df.iloc[row_idx, 1]).strip()
                 if nama_raw == "nan" or not nama_raw or nama_raw == "None": continue
                 if nama_raw not in combined_data: combined_data[nama_raw] = {}
                 scores = df.iloc[row_idx, 2:38].tolist()
                 combined_data[nama_raw][key_code] = scores
 
-        list_nama = list(combined_data.keys())[:7]
+        list_nama = list(combined_data.keys())[:8] # Batasi 8 panelis
         st.write(f"🔄 Memproses {len(list_nama)} panelis...")
 
         for i, nama in enumerate(list_nama):
             template_word.seek(0)
             doc = Document(template_word)
             
-            # Ambil Pekerjaan & Catatan dari Array berdasarkan index i
             pekerjaan_aktif = DAFTAR_PEKERJAAN[i] if i < len(DAFTAR_PEKERJAAN) else "Expert Judgment"
             catatan_aktif = DAFTAR_CATATAN[i] if i < len(DAFTAR_CATATAN) else ""
+            
+            # --- POSISI 1: AMBIL DATA KETERANGAN DARI ARRAY ---
+            ket_item_aktif = DAFTAR_KETERANGAN_ITEM[i] if i < len(DAFTAR_KETERANGAN_ITEM) else {}
 
-            # Fill Header (Nama & Pekerjaan)
+            # Fill Header
             for p in doc.paragraphs:
                 if "Nama" in p.text and ":" in p.text: p.text = f"Nama\t\t: {nama}"
                 if "Pekerjaan" in p.text and ":" in p.text: p.text = f"Pekerjaan\t: {pekerjaan_aktif}"
 
-            # Fill Table (Skor & Catatan Akhir)
+            # Fill Table
             table = doc.tables[0]
             item_counter = 0
             for row in table.rows:
                 text_raw = row.cells[2].text
                 text_clean = "".join(text_raw.split()).lower()
                 
-                # Input Skor Aitem
                 if "(favorable)" in text_clean or "(unfavorable)" in text_clean:
                     d = combined_data[nama]
                     if item_counter < len(d['kj']):
                         row.cells[3].text = format_skor(d['kj'][item_counter])
                         row.cells[4].text = format_skor(d['rel'][item_counter])
                         row.cells[5].text = format_skor(d['kes'][item_counter])
+                        
+                        # --- POSISI 2: ISI KOLOM KETERANGAN PALING KANAN ---[cite: 9]
+                        if item_counter in ket_item_aktif:
+                            row.cells[6].text = ket_item_aktif[item_counter]
+                        # --------------------------------------------------
+                            
                         item_counter += 1
                 
-                # Input Catatan Akhir (Jika baris mengandung kata 'Catatan')
+                # Catatan Global di baris bawah
                 if "catatan" in text_raw.lower() and catatan_aktif:
-                    # Menambahkan catatan ke sel yang sama (biasanya kolom keterangan/catatan)
                     row.cells[2].text = f"{text_raw}\n{catatan_aktif}"
 
-            # Simpan dan Kirim
+            # Simpan dan Kirim ke Telegram
             word_buf = io.BytesIO()
             doc.save(word_buf)
             fname = f"Form Validasi Expert Judgement Forgiveness_{nama.replace(' ', '_')}.docx"
             
-            with st.status(f"Mengirim file {nama}...", expanded=False) as status:
+            with st.status(f"Mengirim {nama}...", expanded=False) as status:
                 if kirim_ke_telegram(word_buf, fname, nama):
                     status.update(label=f"✅ {nama} terkirim!", state="complete")
                 else:
                     status.update(label=f"❌ {nama} gagal.", state="error")
 
         st.balloons()
-        st.success("Batch pengiriman selesai!")
+        st.success("Batch pengiriman 8 panelis selesai!")
 
     except Exception as e:
         st.error(f"Error: {e}")
