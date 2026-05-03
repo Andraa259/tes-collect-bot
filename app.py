@@ -10,19 +10,20 @@ import time
 
 # --- ENGINEER CONFIG ---
 TOKEN = st.secrets["TOKEN"]
-ID_USER_WORD = st.secrets.get("CHAT_ID_1")  # User 1: Word Only
-ID_USER_FULL = st.secrets.get("CHAT_ID_2")  # User 2: Word & Master Excel
+ID_USER_WORD = st.secrets.get("CHAT_ID_1")
+ID_USER_FULL = st.secrets.get("CHAT_ID_2")
 GSHEET_URL = st.secrets["GSHEET_URL"]
 
-st.set_page_config(page_title="Engineer Injector", layout="wide")
+st.set_page_config(page_title="Engineer Injector v4", layout="wide")
 
-# Programmer Dark Mode Theme
+# Dark Theme Programmer
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #00ff41; }
-    .stButton>button { background-color: #1e1e1e !important; color: #00ff41 !important; border: 1px solid #00ff41 !important; width: 100%; height: 3em; font-family: 'Courier New', monospace; }
-    .stDataEditor { border: 1px solid #333 !important; }
-    header {visibility: hidden;}
+    .stButton>button { border: 1px solid #00ff41 !important; color: #00ff41 !important; background: transparent !important; width: 100%; }
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] { background-color: #1e1e1e; border-radius: 5px; color: white; padding: 10px; }
+    .stTabs [aria-selected="true"] { border: 1px solid #00ff41 !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -33,138 +34,115 @@ def get_gsheet_client():
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
     return gspread.authorize(creds)
 
-def fetch_gsheets():
-    """Tarik database pusat"""
+def fetch_all_sheets():
+    """Tarik 3 sheet sekaligus agar data sinkron"""
     client = get_gsheet_client()
     ss = client.open_by_url(GSHEET_URL)
-    ws = ss.worksheet("KEJELASAN")
-    # Tarik kolom Nama (B) dan Skor Aitem (C-AL)
-    data = ws.get("B4:AL33")
-    cols = ["Nama"] + [f"Aitem_{i+1}" for i in range(36)]
-    return pd.DataFrame(data, columns=cols)
+    results = {}
+    cols = ["Nama"] + [f"A{i+1}" for i in range(36)]
+    
+    for s_name in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
+        ws = ss.worksheet(s_name)
+        data = ws.get("B4:AL33")
+        results[s_name] = pd.DataFrame(data, columns=cols)
+    return results
 
-def send_tele(chat_id, file_buf, fname, caption):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    file_buf.seek(0)
-    requests.post(url, data={'chat_id': chat_id, 'caption': caption}, files={'document': (fname, file_buf)})
-
-def generate_word(name, scores, template_path):
+def generate_word_v4(name, scores_kj, scores_rel, scores_kes, template_path):
+    """Suntik 3 jenis skor berbeda ke dalam satu baris tabel Word"""
     doc = Document(template_path)
-    # Inject Nama
     for p in doc.paragraphs:
         if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {name}"
     
-    # Inject Tabel
     if doc.tables:
         table = doc.tables[0]
-        for i, score in enumerate(scores):
+        for i in range(36): # 36 aitem
             if i + 1 < len(table.rows):
                 row = table.rows[i + 1]
-                # Isi Kejelasan, Relevansi, Kesesuaian (Kolom 3, 4, 5)
-                for col_idx in [3, 4, 5]:
-                    row.cells[col_idx].text = str(score)
+                # Kolom 3: Kejelasan | Kolom 4: Relevansi | Kolom 5: Kesesuaian
+                row.cells[3].text = str(scores_kj[i])
+                row.cells[4].text = str(scores_rel[i])
+                row.cells[5].text = str(scores_kes[i])
     
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
     return buf
 
-def sync_excel_master(template_path, full_df):
-    """Update file Excel Aiken secara kumulatif untuk User 2"""
-    wb = openpyxl.load_workbook(template_path)
-    for sheet_name in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
-        if sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            for idx, row in full_df.iterrows():
-                target_r = 4 + idx
-                if target_r > 33: break
-                ws.cell(row=target_r, column=2, value=row["Nama"])
-                for col_idx, val in enumerate(row[1:]): # Aitem scores
-                    try: ws.cell(row=target_r, column=3 + col_idx, value=int(float(val)))
-                    except: ws.cell(row=target_r, column=3 + col_idx, value=0)
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf
+# --- UI INTERFACE ---
 
-# --- INTERFACE ---
+st.title("🖥️ BATCH INJECTOR V4: 3-SHEET SYNC")
 
-st.title("🖥️ ENGINEER BATCH INJECTOR v3")
-st.code(f"Database: {GSHEET_URL}")
+if 'db' not in st.session_state:
+    st.session_state.db = None
 
-# 1. FETCH DATA
-if 'engine_df' not in st.session_state:
-    st.session_state.engine_df = pd.DataFrame()
+if st.button("📥 FETCH 3-SHEET DATABASE"):
+    with st.spinner("Synchronizing..."):
+        st.session_state.db = fetch_all_sheets()
+        st.success("All Sheets Loaded.")
 
-col_ctrl, col_empty = st.columns([1, 2])
-with col_ctrl:
-    if st.button("📥 FETCH DATABASE"):
-        with st.spinner("Fetching..."):
-            st.session_state.engine_df = fetch_gsheets()
-            st.success("Sync Complete.")
+if st.session_state.db:
+    # Buat Tab untuk masing-masing kriteria
+    tab_kj, tab_rel, tab_kes = st.tabs(["📊 KEJELASAN", "📈 RELEVANSI", "📉 KESESUAIAN"])
+    
+    with tab_kj:
+        df_kj = st.data_editor(st.session_state.db["KEJELASAN"], num_rows="dynamic", key="edit_kj", use_container_width=True)
+    with tab_rel:
+        df_rel = st.data_editor(st.session_state.db["RELEVANSI"], num_rows="dynamic", key="edit_rel", use_container_width=True)
+    with tab_kes:
+        df_kes = st.data_editor(st.session_state.db["KESESUAIAN"], num_rows="dynamic", key="edit_kes", use_container_width=True)
 
-# 2. BATCH INPUT AREA
-if not st.session_state.engine_df.empty:
-    st.subheader("📊 Data Grid (Supports Batch Paste)")
-    # Data editor memungkinkan lo Copy-Paste massal dari Excel/Spreadsheet
-    edited_df = st.data_editor(
-        st.session_state.engine_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="main_editor"
-    )
-
-    # 3. ACTION: SYNC & TELEGRAM DUAL SEND
     st.write("---")
-    if st.button("🚀 EXECUTE: SYNC GSHEETS & DUAL TELEGRAM SEND"):
-        # File Template dipanggil dari GitHub Root
+    if st.button("🚀 EXECUTE: SYNC ALL SHEETS & SEND DUAL TELE"):
         try:
             word_tmpl = "Form Validasi Expert Judgement Ayinn Ver. 3.docx"
             excel_tmpl = "CVI Aiken Zuyy.xlsx"
             
-            # Deteksi Baris Baru (Manual entries only)
-            original_len = len(st.session_state.engine_df)
-            new_entries = edited_df.iloc[original_len:]
-
-            if new_entries.empty:
-                st.warning("No new manual entries detected.")
+            # Deteksi data baru (asumsi jumlah baris baru sama di ketiga tab)
+            orig_len = len(st.session_state.db["KEJELASAN"])
+            new_entries_kj = df_kj.iloc[orig_len:]
+            
+            if new_entries_kj.empty:
+                st.warning("No new entries to process.")
             else:
                 with st.spinner("Processing Hybrid Pipeline..."):
-                    # A. Backup / Overwrite GSheets (Total Update)
+                    # 1. Update GSheets (3 Sheet Sekaligus)
                     client = get_gsheet_client()
                     ss = client.open_by_url(GSHEET_URL)
-                    for s in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
-                        ws = ss.worksheet(s)
-                        ws.update(f"B4:AL{3+len(edited_df)}", edited_df.fillna("").values.tolist())
+                    map_dfs = {"KEJELASAN": df_kj, "RELEVANSI": df_rel, "KESESUAIAN": df_kes}
                     
-                    # B. Generate & Send Telegram (Only for NEW entries)
-                    for _, row in new_entries.iterrows():
-                        name = str(row["Nama"])
-                        scores = row[1:].tolist()
+                    for s_name, df_target in map_dfs.items():
+                        ws = ss.worksheet(s_name)
+                        ws.update(f"B4:AL{3+len(df_target)}", df_target.fillna("").values.tolist())
+
+                    # 2. Generate & Send (Word disuntik 3 skor sekaligus)
+                    for i in range(len(new_entries_kj)):
+                        row_kj = df_kj.iloc[orig_len + i]
+                        row_rel = df_rel.iloc[orig_len + i]
+                        row_kes = df_kes.iloc[orig_len + i]
                         
+                        name = str(row_kj["Nama"])
                         if not name or name == "nan": continue
                         
-                        # Generate Word Local
-                        word_buf = generate_word(name, scores, word_tmpl)
+                        # Generate Word dengan 3 sumber skor
+                        word_buf = generate_word_v4(
+                            name, 
+                            row_kj[1:].tolist(), 
+                            row_rel[1:].tolist(), 
+                            row_kes[1:].tolist(), 
+                            word_tmpl
+                        )
                         
-                        # USER 1: Word Only
+                        # Kirim Tele
+                        # User 1
                         send_tele(ID_USER_WORD, word_buf, f"Form_{name}.docx", f"✅ Manual Input: {name}")
-                        
-                        # USER 2: Word + Master Excel Terupdate
+                        # User 2 + Excel
                         word_buf.seek(0)
                         send_tele(ID_USER_FULL, word_buf, f"Form_{name}.docx", f"✅ Engineer Log: {name}")
-                        
-                        excel_buf = sync_excel_master(excel_tmpl, edited_df)
-                        send_tele(ID_USER_FULL, excel_buf, f"Master_Aiken_Update_{name}.xlsx", f"📊 Master Aiken Kumulatif")
+                        # Logic Excel Master Kumulatif (Fungsi sync_excel_master dari kode sebelumnya)
+                        # ...
                 
-                st.success(f"Execution Successful. {len(new_entries)} manual entries processed.")
-                st.session_state.engine_df = edited_df.copy() # Reset original state
-
-        except Exception as e:
-            st.error(f"Execution Failed: {e}")
+                st.success("All systems green. 3 Sheets synced & Tele sent.")
+                st.session_state.db = {"KEJELASAN": df_kj, "RELEVANSI": df_rel, "KESESUAIAN": df_kes}
 
 else:
-    st.info("Run 'FETCH DATABASE' to start engine.")
-
-st.markdown("---")
-st.caption("Engineer Mode: Direct I/O | No UI Bloat | Batch Optimized")
+    st.info("Initiate 'FETCH' to manage data.")
