@@ -41,7 +41,7 @@ def kirim_ke_telegram(file_buf, file_name, panelis_name):
         files = {'document': (file_name, file_buf)}
         payload = {
             'chat_id': chat_id,
-            'caption': f"✅ **Batch Report**: {panelis_name}\nStatus: Berhasil di-generate otomatis."
+            'caption': f"✅ Batch Report: {panelis_name}\nStatus: Berhasil di-generate otomatis."
         }
         try:
             response = requests.post(url, data=payload, files=files)
@@ -115,7 +115,7 @@ def proses_batch_dan_kirim(file_excel, template_word):
             # Simpan dan Kirim
             word_buf = io.BytesIO()
             doc.save(word_buf)
-            fname = f"Form_Validasi_{nama.replace(' ', '_')}.docx"
+            fname = f"Form Validasi Expert Judgement Forgiveness_{nama.replace(' ', '_')}.docx"
             
             with st.status(f"Mengirim file {nama}...", expanded=False) as status:
                 if kirim_ke_telegram(word_buf, fname, nama):
