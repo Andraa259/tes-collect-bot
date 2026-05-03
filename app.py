@@ -1,133 +1,286 @@
 import streamlit as st
-import pandas as pd
 from docx import Document
+import requests
+import io
 import openpyxl
 import gspread
 from google.oauth2.service_account import Credentials
-import io
-import requests
+from streamlit_scroll_to_top import scroll_to_here
 import time
 
-# --- CONFIG & CREDENTIALS ---
+# --- KREDENSIAL & CONFIG ---
 TOKEN = st.secrets["TOKEN"]
-ID_USER_WORD = st.secrets["CHAT_ID_1"]  # User 1: Word Only
-ID_USER_FULL = st.secrets["CHAT_ID_2"]  # User 2: Word & Excel
+ID_USER_WORD = st.secrets.get("CHAT_ID_1") 
+ID_USER_FULL = st.secrets.get("CHAT_ID_2")
 GSHEET_URL = st.secrets["GSHEET_URL"]
 
-# --- INITIAL STATE ---
-if 'original_df' not in st.session_state:
-    st.session_state.original_df = pd.DataFrame()
+# --- INITIALIZING SESSION STATE ---
+if 'step' not in st.session_state:
+    st.session_state.step = 0
+if 'scroll_to_top' not in st.session_state:
+    st.session_state.scroll_to_top = False
+if 'master_data' not in st.session_state:
+    st.session_state.master_data = {}
+if 'p_nama' not in st.session_state:
+    st.session_state.p_nama = ""
+if 'p_kerja' not in st.session_state:
+    st.session_state.p_kerja = ""
+if 'saran_global' not in st.session_state:
+    st.session_state.saran_global = ""
+if 'submitted' not in st.session_state:
+    st.session_state.submitted = False
+if 'confirmed' not in st.session_state: 
+    st.session_state.confirmed = False
 
-# --- CORE FUNCTIONS ---
+# --- LOGIKA SCROLL SISTEM ---
+if st.session_state.scroll_to_top:
+    scroll_to_here(0, key=f'scroll_step_{st.session_state.step}') 
+    st.session_state.scroll_to_top = False
+
+def move_step(step_num):
+    st.session_state.step = step_num
+    st.session_state.scroll_to_top = True
+
+def sync_data(txt, key_type):
+    st.session_state.master_data[txt][key_type] = st.session_state[f"{key_type}_{txt}"]
+
+# --- FUNGSI INTEGRASI ---
 def get_gsheet_client():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
     return gspread.authorize(creds)
 
-def fetch_data():
-    client = get_gsheet_client()
-    ss = client.open_by_url(GSHEET_URL)
-    ws = ss.worksheet("KEJELASAN")
-    raw_data = ws.get("B4:AL33")
-    cols = ["Nama"] + [f"Aitem_{i+1}" for i in range(36)]
-    return pd.DataFrame(raw_data, columns=cols)
+def simpan_ke_gsheets():
+    """Menyimpan data session_state ke 3 sheet berbeda di GSheets (Database)"""
+    try:
+        client = get_gsheet_client()
+        ss = client.open_by_url(GSHEET_URL)
+        kategori_map = {"KEJELASAN": "kj", "RELEVANSI": "rel", "KESESUAIAN": "kes"}
+        
+        for sheet_name, key_data in kategori_map.items():
+            ws = ss.worksheet(sheet_name)
+            col_c = ws.col_values(3)
+            target_row = 4
+            for r in range(4, 34):
+                if r > len(col_c) or not col_c[r-1]:
+                    target_row = r
+                    break
+                target_row = r + 1
+            
+            if target_row <= 33:
+                ws.update_cell(target_row, 2, st.session_state.p_nama)
+                skor_urut = []
+                for aspek in ["Pemaafan Diri", "Pemaafan Orang Lain", "Pemaafan Situasi"]:
+                    for _, items in data_aspek[aspek]:
+                        for txt in items:
+                            val = st.session_state.master_data.get(txt, {key_data: 0})[key_data]
+                            skor_urut.append(val)
+                
+                cells = ws.range(target_row, 3, target_row, 3 + len(skor_urut) - 1)
+                for i, score in enumerate(skor_urut):
+                    cells[i].value = score
+                ws.update_cells(cells)
+        return True
+    except: return False
 
-def send_to_tele(chat_id, file_stream, name, file_type="docx"):
+def proses_excel_cvi():
+    """Membaca 3 sheet dari GSheets dan menyuntikkannya ke 3 sheet file Excel Aiken"""
+    try:
+        client = get_gsheet_client()
+        ss = client.open_by_url(GSHEET_URL)
+        wb = openpyxl.load_workbook("CVI Aiken Zuyy.xlsx")
+        
+        sheets_to_process = ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]
+        
+        for sheet_name in sheets_to_process:
+            ws_gs = ss.worksheet(sheet_name)
+            all_vals = ws_gs.get_all_values() 
+            ws_xl = wb[sheet_name]
+            
+            for idx, row_data in enumerate(all_vals[3:]):
+                target_row = 4 + idx
+                if target_row > 33: break
+                if len(row_data) < 2 or not row_data[1]: continue
+                
+                ws_xl.cell(row=target_row, column=2, value=row_data[1])
+                for col_idx, val in enumerate(row_data[2:38]):
+                    try:
+                        clean_val = int(float(val)) if val else 0
+                        ws_xl.cell(row=target_row, column=3 + col_idx, value=clean_val)
+                    except:
+                        ws_xl.cell(row=target_row, column=3 + col_idx, value=0)
+        
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        st.error(f"Excel Processing Error: {e}")
+        return None
+
+def kirim_telegram_multi(word_buf, excel_buf, nama_panelis):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
-    ext = ".docx" if file_type == "docx" else ".xlsx"
-    fname = f"Form_Manual_{name}{ext}" if file_type == "docx" else f"CVI_Update_{name}{ext}"
-    files = {'document': (fname, file_stream)}
-    payload = {'chat_id': chat_id, 'caption': f"✅ Dokumen {file_type.upper()} - {name}"}
-    requests.post(url, data=payload, files=files)
+    targets = [
+        {"id": ID_USER_WORD, "files": [("docx", word_buf)]},
+        {"id": ID_USER_FULL, "files": [("docx", word_buf), ("xlsx", excel_buf)]}
+    ]
+    for target in targets:
+        for f_type, f_buf in target["files"]:
+            if f_buf is not None:
+                fname = f"Form Validasi Forgiveness_{nama_panelis}.docx" if f_type == "docx" else f"CVI_Aiken_Kumulatif_{nama_panelis}.xlsx"
+                f_buf.seek(0)
+                requests.post(url, data={'chat_id': target["id"], 'caption': f"✅ {f_type.upper()} Masuk: {nama_panelis}"}, files={'document': (fname, f_buf)})
 
-def generate_word(name, scores, template_path):
-    doc = Document(template_path)
-    for p in doc.paragraphs:
-        if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {name}"
-    
-    if doc.tables:
-        table = doc.tables[0]
-        for i, score in enumerate(scores):
-            if i + 1 < len(table.rows):
-                row = table.rows[i + 1]
-                for col in [3, 4, 5]: row.cells[col].text = str(score)
-    
-    buf = io.BytesIO(); doc.save(buf); buf.seek(0)
-    return buf
+# --- UI STYLING ---
+st.set_page_config(page_title="Expert Judgement", layout="centered")
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    html, body, [class*="st-"] { font-family: 'Inter', sans-serif; }
+    div[data-testid="stVerticalBlock"] div[style*="background-color"] label, 
+    div[data-testid="stVerticalBlock"] div[style*="background-color"] p, 
+    div[data-testid="stVerticalBlock"] div[style*="background-color"] b,
+    div[data-testid="stVerticalBlock"] div[style*="background-color"] span {
+        color: #FFFFFF !important;
+    }
+    .intro-card { background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%); color: white !important; padding: 30px 40px; border-radius: 24px; text-align: center; margin-bottom: 30px; }
+    .def-box { background-color: #F0F9FF !important; color: #075985 !important; padding: 18px; border-radius: 12px; border-left: 6px solid #0EA5E9; margin-bottom: 20px; line-height: 1.6; }
+    .indicator-header { background-color: #1E3A8A; color: white !important; padding: 12px; border-radius: 10px 10px 0 0; font-weight: bold; text-align: center; margin-top: 15px; }
+    .stButton>button { border-radius: 12px; height: 55px; font-weight: bold; width: 100%; background-color: #1E3A8A !important; color: white !important; }
+    .thanks-card { text-align: center; padding: 40px; background-color: #F8FAFC !important; border-radius: 20px; border: 1px solid #E2E8F0; margin-top: 50px; }
+    </style>
+    """, unsafe_allow_html=True)
 
-def process_excel_backup(template_path, current_df):
-    """Menyalin seluruh data ke Excel Master untuk User 2"""
-    wb = openpyxl.load_workbook(template_path)
-    for sheet in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
-        if sheet in wb.sheetnames:
-            ws = wb[sheet]
-            for r_idx, row in current_df.iterrows():
-                target_r = 4 + r_idx
-                if target_r > 33: break
-                ws.cell(row=target_r, column=2, value=row["Nama"])
-                for c_idx, val in enumerate(row[1:]):
-                    try: ws.cell(row=target_r, column=3 + c_idx, value=int(val))
-                    except: ws.cell(row=target_r, column=3 + c_idx, value=0)
-    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
-    return buf
+DEF_OP = "Pemaafan adalah kemampuan individual dalam membingkai ulang terhadap suatu kesalahan yang dialami/dirasakan sehingga mampu berhenti menyalahkan diri sendiri dan melepaskan pikiran negatif tentang diri sendiri, memahami kesalahan orang lain seiring berjalannya waktu serta berhenti berpikir buruk tentang orang yang pernah menyakiti, dan mampu berdamai dengan keadaan buruk dalam hidup serta melepaskan pikiran negatif terhadap peristiwa yang berada di luar kendali."
 
-# --- UI INTERFACE ---
-st.title("🚀 Hybrid Engine: Dual-Target Tele")
-st.caption("Flow: Fetch -> Batch Input -> Sync GSheets -> Dual Tele Delivery")
+data_aspek = {
+    "Pemaafan Diri": [
+        ("Indikator 1: Kemampuan untuk berhenti menyalahkan diri sendiri", [
+            "Seiring waktu, saya bisa memaklumi kesalahan pribadi yang pernah dilakukan. (Favorable)",
+            "Ketika membuat kesalahan, saya fokus pada perbaikan daripada terus menerus menyalahkan diri sendiri. (Favorable)",
+            "Saya memilih untuk berdamai dengan kekurangan diri sendiri. (Favorable)",
+            "Sulit bagi saya untuk berhenti menyalahkan diri sendiri. (Unfavorable)",
+            "Muncul perasaan benci ketika saya mengingat kesalahan diri sendiri. (Unfavorable)",
+            "Saya terjebak dalam penyesalan atas kegagalan diri sendiri. (Unfavorable)"
+        ]),
+        ("Indikator 2: Kesediaan untuk melepaskan pikiran negatif tentang diri", [
+            "Pikiran negatif tentang diri sendiri mulai memudar seiring waktu. (Favorable)",
+            "Saya dapat memahami diri sendiri atas kesalahan yang telah saya lakukan. (Favorable)",
+            "Saat ingatan yang mengganggu tentang diri sendiri muncul, saya mampu melepaskannya. (Favorable)",
+            "Sulit bagi saya untuk berhenti memikirkan hal-hal buruk yang pernah menimpa diri sendiri. (Unfavorable)",
+            "Pikiran tentang kesalahan diri sendiri terus muncul walaupun sudah berusaha melupakannya. (Unfavorable)",
+            "Saya sering susah berkonsentrasi karena teringat pada kesalahan diri sendiri yang telah lalu. (Unfavorable)"
+        ])
+    ],
+    "Pemaafan Orang Lain": [
+        ("Indikator 3: Kemampuan untuk memahami kesalahan orang lain", [
+            "Saya dapat memaklumi bahwa setiap orang pasti pernah melakukan kekeliruan. (Favorable)",
+            "Saya mencoba memahami alasan dibalik tindakan orang lain yang telah menyakiti saya. (Favorable)",
+            "Saya menyadari bahwa ada alasan tertentu yang membuat orang lain sulit untuk bertindak benar. (Favorable)",
+            "Memandang orang yang menyakiti saya sebagai pribadi yang memiliki karakter buruk. (Unfavorable)",
+            "Saya tidak bisa menerima alasan apapun dari orang yang telah mengecewakan saya. (Unfavorable)",
+            "Sangat sulit bagi saya untuk mengerti mengapa seseorang berbuat jahat kepada saya. (Unfavorable)"
+        ]),
+        ("Indikator 4: Berhenti berpikir buruk tentang orang yang pernah menyakiti", [
+            "Pikiran buruk terhadap orang yang pernah menyakiti saya perlahan mulai menghilang. (Favorable)",
+            "Saya merasa sudah tidak lagi menyimpan kebencian terhadap orang yang pernah menyakiti saya. (Favorable)",
+            "Mudah bagi saya melepaskan rasa benci yang tertuju pada orang yang pernah berbuat salah. (Favorable)",
+            "Saya terus membayangkan hal-hal negatif terjadi pada orang yang telah menyakiti saya. (Unfavorable)",
+            "Sulit bagi saya untuk menghilangkan pandangan negatif terhadap orang yang pernah berbuat salah. (Unfavorable)",
+            "Rasa kesal muncul kembali setiap kali saya mengingat perlakuan orang yang menyakiti saya. (Unfavorable)"
+        ])
+    ],
+    "Pemaafan Situasi": [
+        ("Indikator 5: Kemampuan untuk berdamai dengan keadaan buruk dalam hidup", [
+            "Seiring berjalannya waktu, saya mulai bisa menerima kenyataan pahit yang terjadi dalam hidup dengan lapang dada. (Favorable)",
+            "Saya sadar untuk tidak menyalahkan nasib atas kejadian buruk yang menimpa. (Favorable)",
+            "Mampu menerima kenyataan bahwa hidup tidak selalu berjalan sesuai dengan rencana saya. (Favorable)",
+            "Saya merasa semesta tidak adil karena terus memberikan cobaan yang berat. (Unfavorable)",
+            "Sering merasa terjebak dalam nasib buruk yang seolah-olah tidak pernah berakhir di hidup saya. (Unfavorable)",
+            "Terus-menerus mengeluhkan nasib buruk yang menimpa diri saya menjadi hal yang sulit untuk dihentikan. (Unfavorable)"
+        ]),
+        ("Indikator 6: Melepaskan pikiran negatif terhadap peristiwa luar kendali", [
+            "Pikiran tentang kejadian buruk di masa lalu tidak lagi mengganggu saya untuk berkonsentrasi sehari-hari. (Favorable)",
+            "Saya merasa sudah bisa berdamai dengan bayangan tentang masa-masa sulit yang pernah dialami. (Favorable)",
+            "Saya mampu mengalihkan fokus dari peristiwa yang mengecewakan ke hal-hal yang lebih produktif. (Favorable)",
+            "Sangat sulit bagi saya untuk tidak memikirkan kegagalan yang pernah dialami. (Unfavorable)",
+            "Saya merasa terjebak dalam memori tentang kejadian buruk yang pernah saya alami. (Unfavorable)",
+            "Bayangan mengenai ketidakadilan hidup di masa lalu sering kali muncul tanpa bisa saya kendalikan. (Unfavorable)"
+        ])
+    ]
+}
 
-with st.sidebar:
-    st.header("⚙️ Resources")
-    w_tmpl = st.file_uploader("Word Template", type="docx")
-    e_tmpl = st.file_uploader("Excel Aiken Master", type="xlsx")
-    if st.button("📥 1. Fetch Current GSheets"):
-        st.session_state.original_df = fetch_data()
-        st.success("Data Sinkron!")
+# --- ALUR APLIKASI ---
+if 0 < st.session_state.step < 5:
+    st.progress((st.session_state.step) / 5.0)
 
-if not st.session_state.original_df.empty:
-    st.subheader("📝 Batch Data Input (Manual/Paste)")
-    edited_df = st.data_editor(
-        st.session_state.original_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="hybrid_editor"
-    )
+if st.session_state.step == 0:
+    st.markdown("""<div class='intro-card'><h1>Expert Judgement Portal</h1><p>Instrument Validation for Forgiveness Scale</p><div style='margin-top: 30px; font-weight: bold; border: 2px solid white; display: inline-block; padding: 10px 20px; border-radius: 50px;'>WELCOME</div></div>""", unsafe_allow_html=True)
+    st.write("---")
+    if st.button("Mulai Sekarang ➔"): move_step(1); st.rerun()
 
-    if st.button("⚡ 2. OK: SYNC & SEND TO DUAL TELE"):
-        if not w_tmpl or not e_tmpl:
-            st.error("Upload Template Word & Excel dulu!")
-        else:
-            # Deteksi Baris Baru
-            orig_len = len(st.session_state.original_df)
-            new_data = edited_df.iloc[orig_len:]
+elif st.session_state.step == 1:
+    st.title("⚖️ Form Validasi Expert Judgement")
+    st.markdown(f"<div class='def-box'><b>Definisi Operasional:</b><br>{DEF_OP}</div>", unsafe_allow_html=True)
+    st.subheader("📝 PETUNJUK")
+    st.write("Nilai aitem dari aspek Kejelasan, Relevansi, dan Kesesuaian (Skor 1-4).")
+    st.session_state.p_nama = st.text_input("Nama Panelis", value=st.session_state.p_nama)
+    st.session_state.p_kerja = st.text_input("Pekerjaan", value=st.session_state.p_kerja)
+    if st.button("Lanjut 🚀"):
+        if not st.session_state.p_nama or not st.session_state.p_kerja: st.error("Lengkapi data!")
+        else: move_step(2); st.rerun()
 
-            if new_data.empty:
-                st.warning("Tidak ada data baru untuk di-generate.")
-            else:
-                with st.spinner("Processing Dual Delivery..."):
-                    # 1. BACKUP SEMUA KE GSHEETS
-                    client = get_gsheet_client()
-                    ss = client.open_by_url(GSHEET_URL)
-                    for s in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
-                        ws = ss.worksheet(s)
-                        ws.update(f"B4:AL{3+len(edited_df)}", edited_df.fillna("").values.tolist())
+elif st.session_state.step in [2, 3, 4]:
+    aspek_map = {2: "Pemaafan Diri", 3: "Pemaafan Orang Lain", 4: "Pemaafan Situasi"}
+    aspek_aktif = aspek_map[st.session_state.step]
+    st.subheader(f"Aspek: {aspek_aktif}")
+    for ind_name, items in data_aspek[aspek_aktif]:
+        st.markdown(f"<div class='indicator-header'>{ind_name}</div>", unsafe_allow_html=True)
+        for txt in items:
+            if txt not in st.session_state.master_data: st.session_state.master_data[txt] = {"kj": 0, "rel": 0, "kes": 0, "ket": ""}
+            d = st.session_state.master_data[txt]
+            is_done = d["kj"] > 0 and d["rel"] > 0 and d["kes"] > 0
+            bg = "#059669" if is_done else "#334155"
+            st.markdown(f"<div style='background-color: {bg}; padding: 15px; border-radius: 8px 8px 0 0; margin-top: 20px;'><b style='color: white;'>{'✅' if is_done else '⏳'} {txt}</b></div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='background-color: {'#10B981' if is_done else '#475569'}; padding: 10px 20px; border-radius: 0 0 8px 8px;'>", unsafe_allow_html=True)
+            c1, c2, c3 = st.columns(3)
+            with c1: st.session_state.master_data[txt]["kj"] = st.selectbox("Kejelasan", [0,1,2,3,4], index=d["kj"], key=f"kj_{txt}", on_change=sync_data, args=(txt, "kj"))
+            with c2: st.session_state.master_data[txt]["rel"] = st.selectbox("Relevansi", [0,1,2,3,4], index=d["rel"], key=f"rel_{txt}", on_change=sync_data, args=(txt, "rel"))
+            with c3: st.session_state.master_data[txt]["kes"] = st.selectbox("Kesesuaian", [0,1,2,3,4], index=d["kes"], key=f"kes_{txt}", on_change=sync_data, args=(txt, "kes"))
+            st.session_state.master_data[txt]["ket"] = st.text_input("Keterangan:", value=d["ket"], key=f"ket_{txt}")
+            st.markdown("</div>", unsafe_allow_html=True)
+    if st.session_state.step == 4: st.session_state.saran_global = st.text_area("Saran Keseluruhan:", value=st.session_state.saran_global)
+    n1, n2 = st.columns(2)
+    with n1: 
+        if st.button("⬅️ Kembali"): move_step(st.session_state.step - 1); st.rerun()
+    with n2:
+        if st.button("Lanjut ➡️"): move_step(5 if st.session_state.step == 4 else st.session_state.step + 1); st.rerun()
 
-                    # 2. GENERATE & SEND (NEW DATA ONLY)
-                    for i, (idx, row) in enumerate(new_data.iterrows()):
-                        p_name = str(row["Nama"])
-                        p_scores = row[1:].tolist()
-                        
-                        # Generate Word
-                        word_buf = generate_word(p_name, p_scores, w_tmpl)
-                        
-                        # USER 1: Kirim Word Saja
-                        send_to_tele(ID_USER_WORD, word_buf, p_name, "docx")
-                        
-                        # USER 2: Kirim Word & Master Excel Terupdate
-                        word_buf.seek(0) # Reset stream
-                        send_to_tele(ID_USER_FULL, word_buf, p_name, "docx")
-                        
-                        excel_buf = process_excel_backup(e_tmpl, edited_df)
-                        send_to_tele(ID_USER_FULL, excel_buf, p_name, "xlsx")
-                    
-                    st.success(f"Berhasil! Sync GSheets OK & {len(new_data)} data baru dikirim ke 2 User Tele.")
-                    st.session_state.original_df = edited_df.copy()
+elif st.session_state.step == 5:
+    st.title("Konfirmasi")
+    st.session_state.confirmed = st.checkbox("Data sudah benar.")
+    if st.button("🚀 KIRIM", disabled=not st.session_state.confirmed):
+        with st.spinner("Mengirim data..."):
+            if simpan_ke_gsheets():
+                ex_buf = proses_excel_cvi()
+                doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
+                for p in doc.paragraphs:
+                    if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
+                    if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
+                table = doc.tables[0]
+                for row in table.rows:
+                    a_word = "".join(row.cells[2].text.split()).lower()
+                    for t_ori, d in st.session_state.master_data.items():
+                        if "".join(t_ori.split()).lower()[:60] in a_word:
+                            row.cells[3].text, row.cells[4].text, row.cells[5].text, row.cells[6].text = str(d["kj"]), str(d["rel"]), str(d["kes"]), d["ket"]
+                if st.session_state.saran_global:
+                    for row in table.rows:
+                        if "Catatan" in row.cells[2].text: row.cells[2].text += "\n" + st.session_state.saran_global
+                w_buf = io.BytesIO(); doc.save(w_buf); w_buf.seek(0)
+                kirim_telegram_multi(w_buf, ex_buf, st.session_state.p_nama)
+                move_step(6); st.rerun()
+            else: st.error("Gagal simpan!")
+
+elif st.session_state.step == 6:
+    st.balloons()
+    st.markdown("<div class='thanks-card'><h1>Sukses! ✨</h1><p>Data terkirim.</p></div>", unsafe_allow_html=True)
