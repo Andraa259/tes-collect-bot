@@ -68,14 +68,14 @@ def proses_batch_dan_kirim(file_excel, template_word):
         # Ekstraksi Data Excel
         for sheet_name, key_code in sheets.items():
             df = pd.read_excel(file_excel, sheet_name=sheet_name, header=None)
-            for row_idx in range(3, len(df)):
+            for row_idx in range(3, 10):
                 nama_raw = str(df.iloc[row_idx, 1]).strip()
                 if nama_raw == "nan" or not nama_raw or nama_raw == "None": continue
                 if nama_raw not in combined_data: combined_data[nama_raw] = {}
                 scores = df.iloc[row_idx, 2:38].tolist()
                 combined_data[nama_raw][key_code] = scores
 
-        list_nama = list(combined_data.keys())
+        list_nama = list(combined_data.keys())[:7]
         st.write(f"🔄 Memproses {len(list_nama)} panelis...")
 
         for i, nama in enumerate(list_nama):
