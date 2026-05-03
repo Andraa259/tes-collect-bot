@@ -9,7 +9,7 @@ import openpyxl
 import time
 
 # --- 1. CONFIG ---
-st.set_page_config(page_title="Engineer Master Hybrid v7.13", layout="wide")
+st.set_page_config(page_title="Engineer Master Hybrid v7.14", layout="wide")
 
 TOKEN = st.secrets["TOKEN"]
 ID_USER_WORD = st.secrets.get("CHAT_ID_1") 
@@ -30,6 +30,44 @@ def find_first_empty_row(ws):
             return r
     return 34
 
+def proses_excel_cvi():
+    """Mengambil data TERBARU dari GSheets dan merakitnya ke file Excel Kumulatif"""
+    try:
+        client = get_gsheet_client()
+        ss = client.open_by_url(GSHEET_URL)
+        # Pastikan file 'CVI Aiken Zuyy.xlsx' ada di folder project GitHub lo
+        wb = openpyxl.load_workbook("CVI Aiken Zuyy.xlsx")
+        
+        for s_name in ["KEJELASAN", "RELEVANSI", "KESESUAIAN"]:
+            ws_gs = ss.worksheet(s_name)
+            all_vals = ws_gs.get_all_values() # Ambil semua data GSheets
+            ws_xl = wb[s_name]
+            
+            # Looping mulai baris 4 GSheets (index 3)
+            for idx, row_data in enumerate(all_vals[3:]):
+                target_row = 4 + idx
+                if target_row > 33 or len(row_data) < 2 or not row_data[1]: 
+                    break
+                
+                # Isi Nama ke Kolom B
+                ws_xl.cell(row=target_row, column=2, value=row_data[1])
+                
+                # Isi Skor A1-A36 ke Kolom C-AL
+                for col_idx, val in enumerate(row_data[2:38]):
+                    try:
+                        # Convert ke angka biar Excel bisa ngitung formulanya
+                        ws_xl.cell(row=target_row, column=3 + col_idx, value=int(float(val)))
+                    except:
+                        ws_xl.cell(row=target_row, column=3 + col_idx, value=0)
+                        
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+    except Exception as e:
+        st.error(f"Gagal generate Excel Kumulatif: {e}")
+        return None
+
 def send_tele(chat_id, file_buf, fname, caption):
     url = f"https://api.telegram.org/bot{TOKEN}/sendDocument"
     file_buf.seek(0)
@@ -37,7 +75,7 @@ def send_tele(chat_id, file_buf, fname, caption):
 
 # --- 3. UI ENGINE ---
 
-st.title("🖥️ MASTER HYBRID v7.13 (AUTO SHIFTER)")
+st.title("🖥️ MASTER HYBRID v7.14 (CUMULATIVE SYNC)")
 
 if 'batch_data' not in st.session_state:
     st.session_state.batch_data = None
@@ -55,16 +93,15 @@ if up_file:
                 
                 rows = []
                 for i in range(len(raw_xl)):
-                    name = raw_xl.iloc[i, 1] # Kolom B (Index 1)
+                    name = raw_xl.iloc[i, 1] 
                     if pd.isna(name) or str(name).strip() == "": continue
                     
-                    # LOGIKA SHIFTING:
                     if s_name == "KEJELASAN":
-                        job = raw_xl.iloc[i, 2] # Pekerjaan di Kolom C
-                        start_skor = 3 # Skor mulai Kolom D
+                        job = raw_xl.iloc[i, 2] 
+                        start_skor = 3 
                     else:
-                        job = "" # Sheet lain ga ada kolom Pekerjaan
-                        start_skor = 2 # Skor mulai Kolom C
+                        job = "" 
+                        start_skor = 2 
                     
                     row_dict = {"Nama": str(name), "Pekerjaan": str(job) if not pd.isna(job) else ""}
                     for a_idx in range(36):
@@ -86,7 +123,6 @@ if st.session_state.batch_data:
     
     for i, tab in enumerate(tabs):
         with tab:
-            # Sembunyikan kolom Pekerjaan di tab selain KEJELASAN
             config = {}
             if sheets[i] != "KEJELASAN": config["Pekerjaan"] = None
             
@@ -99,8 +135,9 @@ if st.session_state.batch_data:
 
     if st.button("🚀 EXECUTE SYNC"):
         try:
-            with st.spinner("Processing..."):
-                client = get_gsheet_client(); ss = client.open_by_url(GSHEET_URL)
+            with st.spinner("Processing GSheets & Word..."):
+                client = get_gsheet_client()
+                ss = client.open_by_url(GSHEET_URL)
                 w_tmpl = "Form Validasi Expert Judgement Ayinn Ver. 3.docx"
                 
                 db_kj = st.session_state.batch_data["KEJELASAN"]
@@ -109,9 +146,8 @@ if st.session_state.batch_data:
 
                 for idx in range(len(db_kj)):
                     name = str(db_kj.iloc[idx]["Nama"])
-                    job = str(db_kj.iloc[idx]["Pekerjaan"]) # Pekerjaan diambil dari Master KJ
+                    job = str(db_kj.iloc[idx]["Pekerjaan"]) 
                     
-                    # 1. Update GSheets (Berdasarkan urutan aitem)
                     for s_name in sheets:
                         ws = ss.worksheet(s_name)
                         target_row = find_first_empty_row(ws)
@@ -124,7 +160,7 @@ if st.session_state.batch_data:
                             for s_idx, v in enumerate(skor): cells[s_idx].value = v
                             ws.update_cells(cells)
 
-                    # 2. Word Injection
+                    # Generate Word
                     doc = Document(w_tmpl)
                     for p in doc.paragraphs:
                         if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {name}"
@@ -145,7 +181,16 @@ if st.session_state.batch_data:
                     
                     word_buf = io.BytesIO(); doc.save(word_buf); word_buf.seek(0)
                     send_tele(ID_USER_WORD, word_buf, f"Form Validasi Expert Judgement Forgiveness_{name}.docx", f"✅ Word: {name}")
-                    word_buf.seek(0); send_tele(ID_USER_FULL, word_buf, f"Form Validasi Expert Judgement Forgiveness_{name}.docx", f"✅ Full Log: {name}")
+                    word_buf.seek(0)
+                    send_tele(ID_USER_FULL, word_buf, f"Form Validasi Expert Judgement Forgiveness_{name}.docx", f"✅ Full Log: {name}")
+
+                # --- 🎯 BAGIAN PENGIRIMAN EXCEL KUMULATIF ---
+                st.write("---")
+                with st.spinner("Meresume GSheets ke Excel Kumulatif..."):
+                    excel_kumulatif = proses_excel_cvi()
+                    if excel_kumulatif:
+                        send_tele(ID_USER_FULL, excel_kumulatif, f"Rekap_CVI_Aiken_Latest_{int(time.time())}.xlsx", "📊 REKAP KUMULATIF SELURUH PANELIS")
+                        st.success("Excel Kumulatif terkirim ke Admin!")
 
                 st.success("Selesai! GSheets terisi & Word terkirim.")
                 st.session_state.batch_data = None
