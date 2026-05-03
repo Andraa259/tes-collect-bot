@@ -1,87 +1,114 @@
 import streamlit as st
+import pandas as pd
 from docx import Document
-from docx.shared import Cm, Pt
-from datetime import datetime
 import io
 
-def get_indo_date():
-    months = {
-        1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 
-        5: "Mei", 6: "Juni", 7: "Juli", 8: "Agustus", 
-        9: "September", 10: "Oktober", 11: "November", 12: "Desember"
-    }
-    now = datetime.now()
-    return f"{now.day} {months[now.month]} {now.year}"
+# --- 1. KONFIGURASI PEKERJAAN (ARRAY URUT) ---
+# Sesuaikan isi teks di dalam kurung siku sesuai urutan panelis di Excel
+DAFTAR_PEKERJAAN = [
+    "Dosen Psikologi",              # Untuk Panelis 1: Juli
+    "Mahasiswi Psikologi",          # Untuk Panelis 2: Amelia Nayla
+    "Akademisi",                    # Untuk Panelis 3: Farah Tazqia
+    "Praktisi Psikologi",           # Untuk Panelis 4: nilon dharu
+    "Dosen Psikologi",              # Untuk Panelis 5: Mukhammad Elvino
+    "Peneliti Psikometri",          # Untuk Panelis 6: Flora Frederica
+    "Mahasiswi Psikologi"           # Untuk Panelis 7: Jeniffer
+]
 
-st.title("Auto-Sign Expert (Zero Ghost Space)")
+def proses_batch_word(file_excel, template_word):
+    sheets = {'KEJELASAN': 'kj', 'RELEVANSI': 'rel', 'KESESUAIAN': 'kes'}
+    combined_data = {}
 
-uploaded_file = st.file_uploader("Upload Word", type=["docx"])
-img_file = st.file_uploader("Upload TTD", type=["png", "jpg", "jpeg"])
-expert_name = st.text_input("Nama Expert")
+    try:
+        # --- 2. EKSTRAKSI DATA DARI EXCEL ---
+        for sheet_name, key_code in sheets.items():
+            # Membaca data mulai baris ke-4 (index 3)
+            df = pd.read_excel(file_excel, sheet_name=sheet_name, header=None)
+            
+            # Ambil data panelis (baris 4 sampai selesai)
+            for row_idx in range(3, len(df)):
+                nama_raw = str(df.iloc[row_idx, 1]).strip()
+                if nama_raw == "nan" or not nama_raw: 
+                    continue
+                
+                if nama_raw not in combined_data:
+                    combined_data[nama_raw] = {}
+                
+                # Ambil 36 skor (index 2 sampai 37)
+                scores = df.iloc[row_idx, 2:38].tolist()
+                combined_data[nama_raw][key_code] = scores
 
-if st.button("Generate Dokumen"):
-    if uploaded_file and img_file and expert_name:
-        doc = Document(uploaded_file)
-        TTD_WIDTH = Cm(4.5)
+        st.divider()
+        st.subheader(f"✅ Terdeteksi {len(combined_data)} Panelis")
 
-        # 1. Kumpulkan semua paragraf (Body + Tabel)
-        # Kita pakai list baru agar tidak error saat menghapus elemen di tengah jalan
-        all_paragraphs = list(doc.paragraphs)
-        for table in doc.tables:
+        # --- 3. GENERATE WORD UNTUK SETIAP PANELIS ---
+        list_nama_panelis = list(combined_data.keys())
+
+        for i, nama in enumerate(list_nama_panelis):
+            # Reset template untuk setiap orang
+            template_word.seek(0)
+            doc = Document(template_word)
+            
+            # Mapping Pekerjaan dari Array
+            pekerjaan_aktif = DAFTAR_PEKERJAAN[i] if i < len(DAFTAR_PEKERJAAN) else "Expert Judgment"
+
+            # Isi Nama dan Pekerjaan di Paragraf
+            for p in doc.paragraphs:
+                if "Nama" in p.text and ":" in p.text:
+                    p.text = f"Nama\t\t: {nama}"
+                if "Pekerjaan" in p.text and ":" in p.text:
+                    p.text = f"Pekerjaan\t: {pekerjaan_aktif}"
+
+            # Isi Tabel Skor
+            table = doc.tables[0]
+            item_counter = 0
+            
             for row in table.rows:
-                for cell in row.cells:
-                    all_paragraphs.extend(cell.paragraphs)
-
-        # 2. Proses Manipulasi
-        for p in all_paragraphs:
-            # LOGIKA A: Baris Surabaya (Tempat, Tanggal, TTD, dan Nama)
-            if "Surabaya," in p.text:
-                p.text = "" # Bersihkan baris
-                run = p.add_run(f"Surabaya, {get_indo_date()}")
+                # Logika Pembersihan Spasi (Resolved)
+                text_kolom_aitem = "".join(row.cells[2].text.split()).lower()
                 
-                # Enter 1: Setelah tanggal ke TTD
-                run.add_break() 
-                run.add_picture(img_file, width=TTD_WIDTH)
-                
-                # Enter 2: Setelah TTD ke Nama
-                run.add_break() 
-                run.add_text(f"{expert_name}")
-                
-                # Set spasi baris agar rapat
-                p.paragraph_format.line_spacing = 1.0
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.space_before = Pt(0)
+                # Cek apakah baris ini berisi aitem (Favorable/Unfavorable)
+                if "(favorable)" in text_kolom_aitem or "(unfavorable)" in text_kolom_aitem:
+                    data_skor = combined_data[nama]
+                    if item_counter < len(data_skor['kj']):
+                        # Isi kolom KJ, REL, KES (Cell index 3, 4, 5)
+                        row.cells[3].text = str(int(float(data_skor['kj'][item_counter])))
+                        row.cells[4].text = str(int(float(data_skor['rel'][item_counter])))
+                        row.cells[5].text = str(int(float(data_skor['kes'][item_counter])))
+                        item_counter += 1
 
-            # LOGIKA B: Hapus baris '(Tt Expert Judgement)' secara aman
-            elif "(Tt Expert Judgement)" in p.text:
-                try:
-                    p_element = p._element
-                    parent = p_element.getparent()
-                    if parent is not None:
-                        parent.remove(p_element)
-                except Exception:
-                    # Jika gagal hapus permanen, kita kosongkan saja teks & spasinya
-                    p.text = ""
-                    p.paragraph_format.line_spacing = Pt(1)
-                    p.paragraph_format.space_after = Pt(0)
-                    p.paragraph_format.space_before = Pt(0)
+            # --- 4. OUTPUT DOWNLOAD BUTTON ---
+            buf = io.BytesIO()
+            doc.save(buf)
+            buf.seek(0)
+            
+            st.download_button(
+                label=f"📥 Download Form: {nama}",
+                data=buf,
+                file_name=f"Form_Validasi_{nama.replace(' ', '_')}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key=f"btn_{i}"
+            )
 
-            # LOGIKA C: Hapus 'Enter' liar atau baris kosong di area tanda tangan
-            # Ini untuk menangani spasi sisa yang kamu keluhkan
-            elif p.text.strip() == "" and "(Tt Expert Judgement)" not in p.text:
-                # Jika baris benar-benar kosong, kita ciutkan ukurannya jadi nol
-                p.paragraph_format.line_spacing = Pt(1)
-                p.paragraph_format.space_after = Pt(0)
-                p.paragraph_format.space_before = Pt(0)
+    except Exception as e:
+        st.error(f"Terjadi kesalahan teknis: {e}")
 
-        # 3. Simpan dan Download
-        target_stream = io.BytesIO()
-        doc.save(target_stream)
-        
-        st.success("Berhasil! Jarak dan spasi sudah dikoreksi.")
-        st.download_button(
-            label="Download Hasil Final",
-            data=target_stream.getvalue(),
-            file_name=f"Validated_Fixed_{expert_name}.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+# --- UI UTAMA ---
+st.set_page_config(page_title="Final Word Batch Generator", layout="centered")
+st.title("📄 Forgiveness Scale: Batch Word Generator")
+st.markdown("Sistem ini akan menulis ulang 7 file Word secara otomatis berdasarkan data Excel.")
+
+with st.expander("ℹ️ Instruksi"):
+    st.write("1. Upload file Excel CVI Aiken (Kumulatif).")
+    st.write("2. Upload template Word (Form yang kolom skornya masih kosong).")
+    st.write("3. Klik tombol 'Proses' untuk memunculkan link download setiap panelis.")
+
+col1, col2 = st.columns(2)
+with col1:
+    up_excel = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"])
+with col2:
+    up_word = st.file_uploader("Upload Template Word (.docx)", type=["docx"])
+
+if up_excel and up_word:
+    if st.button("🚀 PROSES & REWRITE SEMUA DATA", use_container_width=True):
+        proses_batch_word(up_excel, up_word)
