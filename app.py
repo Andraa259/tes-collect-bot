@@ -187,8 +187,8 @@ if st.session_state.batch_data:
                                     break # Keluar loop master, lanjut ke baris tabel berikutnya
                     
                     word_buf = io.BytesIO(); doc.save(word_buf); word_buf.seek(0)
-                    send_tele(ID_USER_WORD, word_buf, f"Form Validasi_{name}.docx", f"✅ Word: {name}")
-                    word_buf.seek(0); send_tele(ID_USER_FULL, word_buf, f"Form Validasi_{name}.docx", f"✅ Full Log: {name}")
+                    send_tele(ID_USER_WORD, word_buf, f"Form Validasi Expert Judgement Forgiveness_{name}.docx", f"✅ Word: {name}")
+                    word_buf.seek(0); send_tele(ID_USER_FULL, word_buf, f"Form Validasi Expert Judgement Forgiveness_{name}.docx", f"✅ Full Log: {name}")
 
                 # 3. KIRIM EXCEL REKAP KUMULATIF KE ADMIN
                 excel_rekap = proses_excel_cvi()
