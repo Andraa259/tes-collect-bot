@@ -2,51 +2,65 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 
-def process_data_psp(file):
-    # Membaca file
+def process_expert_judgement(file):
+    # Membaca data
     df = pd.read_excel(file)
     
-    # Identifikasi kolom Nama (berdasarkan struktur file Aitem PSP.xlsx)
-    # Kolom ini: 'NAMA (Jika memiliki gelar, tolong di sertakan)'
-    name_col = [col for col in df.columns if 'NAMA' in col.upper()][0]
+    # Identifikasi kolom nama secara spesifik sesuai file Anda
+    name_col = 'Nama Panelis (Jika memiliki gelar, mohon disertakan)'
     
-    # Mencari kolom skor berdasarkan kategori di dalam kurung siku
+    # 1. Hapus baris dengan nama 'zaki' (case-insensitive)
+    # Ini akan membuat data dimulai dari Jennifer (baris 3 di Excel asli)
+    df = df[df[name_col].str.contains('zaki', case=False, na=False) == False]
+    
+    # 2. Filter kolom berdasarkan kategori [Kejelasan], [Relevansi], [Kesesuaian]
+    # Mengabaikan kolom 'Keterangan', 'Email', 'Timestamp', dan 'Universitas'
     kejelasan_cols = [col for col in df.columns if '[Kejelasan]' in col]
     relevansi_cols = [col for col in df.columns if '[Relevansi]' in col]
     kesesuaian_cols = [col for col in df.columns if '[Kesesuaian]' in col]
 
-    # Fungsi untuk membersihkan dan mengambil Nama + Skor saja
-    def clean_sheet(cols):
+    # Fungsi pembantu untuk membuat dataframe per sheet
+    def create_clean_df(cols):
         return df[[name_col] + cols].copy()
 
-    # Ekspor ke Excel dengan multiple sheets
+    # 3. Proses Export ke Excel dengan 3 Sheets
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        clean_sheet(kejelasan_cols).to_excel(writer, sheet_name='Kejelasan', index=False)
-        clean_sheet(relevansi_cols).to_excel(writer, sheet_name='Relevansi', index=False)
-        clean_sheet(kesesuaian_cols).to_excel(writer, sheet_name='Kesesuaian', index=False)
-    
+        # Sheet Kejelasan
+        df_kej = create_clean_df(kejelasan_cols)
+        df_kej.to_excel(writer, sheet_name='Kejelasan', index=False)
+        
+        # Sheet Relevansi
+        df_rel = create_clean_df(relevansi_cols)
+        df_rel.to_excel(writer, sheet_name='Relevansi', index=False)
+        
+        # Sheet Kesesuaian
+        df_kes = create_clean_df(kesesuaian_cols)
+        df_kes.to_excel(writer, sheet_name='Kesesuaian', index=False)
+        
     return output.getvalue()
 
-# Antarmuka Streamlit
-st.set_page_config(page_title="PSP Data Cleaner", page_icon="📑")
-st.title("📑 PSP Item Response Cleaner")
-st.write("Program ini akan membersihkan file **Aitem PSP.xlsx** dan memisahkan Skor berdasarkan kategori.")
+# --- UI Streamlit ---
+st.set_page_config(page_title="Expert Judgement Cleaner", layout="centered")
+st.title("🧼 Expert Judgement Data Cleaner")
+st.info("File akan dibersihkan: Nama 'Zaki' dihapus, kolom 'Keterangan' dibuang, dan dikelompokkan per sheet.")
 
-uploaded_file = st.file_uploader("Unggah file Aitem PSP.xlsx", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload file 'Formulir tanpa judul (Jawaban) (1).xlsx'", type=["xlsx"])
 
 if uploaded_file:
-    with st.spinner("Sedang memproses..."):
+    with st.spinner("Sedang memproses data..."):
         try:
-            processed_file = process_data_psp(uploaded_file)
+            # Jalankan fungsi pembersihan
+            clean_data = process_expert_judgement(uploaded_file)
             
-            st.success("Pembersihan selesai! Email, Timestamp, dan Universitas telah dihapus.")
+            st.success("✅ Berhasil! Baris 'Zaki' telah dihapus dan data sudah dikelompokkan.")
             
+            # Tombol Download
             st.download_button(
-                label="📥 Download File Terpilih (Nama & Skor Saja)",
-                data=processed_file,
-                file_name="Aitem_PSP_Cleaned.xlsx",
+                label="📥 Download Data Bersih (Excel)",
+                data=clean_data,
+                file_name="Data_Validasi_Clean_3.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         except Exception as e:
-            st.error(f"Terjadi kesalahan teknis: {e}")
+            st.error(f"Terjadi kesalahan: {e}")
