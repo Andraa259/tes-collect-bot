@@ -112,6 +112,9 @@ def kirim_telegram_multi(word_buf, excel_buf, nama_panelis):
                 f_buf.seek(0)
                 requests.post(url, data={'chat_id': target["id"], 'caption': f"✅ {f_type.upper()} Masuk: {nama_panelis}"}, files={'document': (fname, f_buf)})
 
+def trigger_submit():
+    st.session_state.submitted = True
+
 # --- UI STYLING ---
 st.set_page_config(page_title="Expert Judgement", layout="centered")
 st.markdown("""
@@ -291,15 +294,15 @@ elif st.session_state.step in [2, 3, 4]:
             if False: st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
             else: move_step(5 if st.session_state.step == 4 else st.session_state.step + 1); st.rerun()
 
-# STEP 5: KONFIRMASI
+
+# --- Ubah STEP 5 lo jadi seperti ini ---
 elif st.session_state.step == 5:
     st.title("Konfirmasi & Pengiriman")
     st.warning("Mohon periksa kembali penilaian Anda. Setelah dikirim, data tidak dapat diubah.")
     
-    # 1. Definisi status kunci (Locking)
+    # 1. Kunci status UI
     is_processing = st.session_state.submitted
     
-    # 2. Tambahkan parameter 'disabled' agar checkbox terkunci saat proses
     st.session_state.confirmed = st.checkbox(
         "Saya menyatakan bahwa data yang saya masukkan sudah benar.", 
         disabled=is_processing
@@ -307,55 +310,61 @@ elif st.session_state.step == 5:
     
     nav1, nav2 = st.columns(2)
     with nav1:
-        # 3. Tambahkan 'disabled' agar tidak bisa kembali saat data sedang dikirim
         if st.button("⬅️ Kembali ke Penilaian", disabled=is_processing): 
             move_step(4)
             st.rerun()
             
     with nav2:
-        # 4. Tambahkan 'is_processing' pada disabled agar tombol mati setelah diklik
-        if st.button("🚀 YA, KIRIM SEKARANG", disabled=not st.session_state.confirmed or is_processing):
-            
-            # 5. PINDAHKAN POSISI: Langsung set True di awal klik untuk mengunci
-            st.session_state.submitted = True
-            
-            with st.spinner("Sedang memproses..."):
-                try:
-                    # Jalankan fungsi simpan seperti biasa
-                    simpan_ke_gsheets()
-                    excel_buf = proses_excel_cvi()
-                    
-                    doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
-                    for p in doc.paragraphs:
-                        if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
-                        if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
-                    
-                    table = doc.tables[0]
+        # 2. GUNAKAN CALLBACK (on_click)
+        # Tombol ini hanya bertugas mengubah status submitted jadi True
+        st.button(
+            "🚀 YA, KIRIM SEKARANG", 
+            on_click=trigger_submit, 
+            disabled=not st.session_state.confirmed or is_processing
+        )
+
+    # 3. LOGIKA BERAT DIJALANKAN DI LUAR TOMBOL
+    # Jika status submitted True tapi belum pindah step, jalankan ini
+    if st.session_state.submitted and st.session_state.step == 5:
+        with st.spinner("Sedang memproses... Mohon tunggu sebentar."):
+            try:
+                # Proses simpan GSheets (Titik yang sering double)
+                simpan_ke_gsheets()
+                excel_buf = proses_excel_cvi()
+                
+                # Proses Word
+                doc = Document("Form Validasi Expert Judgement Ayinn Ver. 3.docx")
+                for p in doc.paragraphs:
+                    if "Nama\t\t:" in p.text: p.text = f"Nama\t\t: {st.session_state.p_nama}"
+                    if "Pekerjaan\t:" in p.text: p.text = f"Pekerjaan\t: {st.session_state.p_kerja}"
+                
+                table = doc.tables[0]
+                for row in table.rows:
+                    a_word = "".join(row.cells[2].text.split()).lower()
+                    for t_ori, d in st.session_state.master_data.items():
+                        if "".join(t_ori.split()).lower()[:60] in a_word:
+                            row.cells[3].text, row.cells[4].text, row.cells[5].text, row.cells[6].text = str(d["kj"]), str(d["rel"]), str(d["kes"]), d["ket"]
+                
+                if st.session_state.saran_global:
                     for row in table.rows:
-                        a_word = "".join(row.cells[2].text.split()).lower()
-                        for t_ori, d in st.session_state.master_data.items():
-                            if "".join(t_ori.split()).lower()[:60] in a_word:
-                                row.cells[3].text, row.cells[4].text, row.cells[5].text, row.cells[6].text = str(d["kj"]), str(d["rel"]), str(d["kes"]), d["ket"]
-                    
-                    if st.session_state.saran_global:
-                        for row in table.rows:
-                            if "Catatan" in row.cells[2].text: 
-                                row.cells[2].text += "\n" + st.session_state.saran_global
-                    
-                    word_buf = io.BytesIO()
-                    doc.save(word_buf)
-                    word_buf.seek(0)
-                    
-                    kirim_telegram_multi(word_buf, excel_buf, st.session_state.p_nama)
-                    
-                    # Berhasil! Pindah ke step 6
-                    move_step(6)
-                    st.rerun()
-                    
-                except Exception as e:
-                    # 6. RESET jika error agar user bisa mencoba kirim ulang
-                    st.session_state.submitted = False 
-                    st.error(f"Terjadi kesalahan: {e}")
+                        if "Catatan" in row.cells[2].text: 
+                            row.cells[2].text += "\n" + st.session_state.saran_global
+                
+                word_buf = io.BytesIO()
+                doc.save(word_buf)
+                word_buf.seek(0)
+                
+                # Kirim Telegram
+                kirim_telegram_multi(word_buf, excel_buf, st.session_state.p_nama)
+                
+                # SELESAI: Pindah ke step terakhir
+                move_step(6)
+                st.rerun()
+                
+            except Exception as e:
+                # Reset status submitted jika terjadi error agar bisa coba lagi
+                st.session_state.submitted = False 
+                st.error(f"Terjadi kesalahan: {e}")
 
 # STEP 6: SELESAI
 elif st.session_state.step == 6:
