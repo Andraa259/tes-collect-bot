@@ -2,28 +2,28 @@ import streamlit as st
 import pandas as pd
 from io import BytesIO
 
-def process_expert_mapping_final(file):
+def process_psp_mapping(file):
     # Membaca file Excel
     df = pd.read_excel(file)
     
-    # Indeks Nama Panelis tetap di 3
+    # Indeks Nama Panelis adalah 3 (NAMA)
     name_col_idx = 3
+    name_col_name = df.columns[name_col_idx]
     
-    # Algoritma Mapping per 4 Kolom (Mulai Indeks 5)
-    # Urutan: Kejelasan (i), Relevansi (i+1), Kesesuaian (i+2), Keterangan (i+3)
+    # Algoritma Mapping per 3 Kolom (Mulai Indeks 5)
+    # i = Kejelasan, i+1 = Relevansi, i+2 = Kesesuaian
     kej_indices = []
     rel_indices = []
     kes_indices = []
     
-    # Loop melalui seluruh kolom mulai dari indeks 5 dengan langkah 4
-    for i in range(5, len(df.columns), 4):
+    # Loop melalui seluruh kolom mulai dari indeks 5 dengan langkah 3
+    for i in range(5, len(df.columns), 3):
         if i < len(df.columns):
             kej_indices.append(i)
         if i + 1 < len(df.columns):
             rel_indices.append(i + 1)
         if i + 2 < len(df.columns):
             kes_indices.append(i + 2)
-        # Indeks i + 3 (Keterangan) otomatis terlewati
 
     def create_clean_sheet(indices):
         # Mengambil kolom Nama + Kolom Skor berdasarkan indeks posisi
@@ -40,23 +40,24 @@ def process_expert_mapping_final(file):
     return output.getvalue(), len(kej_indices)
 
 # --- Antarmuka Streamlit ---
-st.set_page_config(page_title="Expert Mapping Final", layout="wide")
-st.title("🧩 Expert Judgement Mapper (Positional Algorithm)")
-st.write("Memproses **seluruh baris data** dengan pemetaan setiap 4 kolom.")
+st.set_page_config(page_title="PSP Mapping Tool", layout="wide")
+st.title("📑 PSP Item Positional Mapper (3-Column Step)")
+st.write("Algoritma: Mapping otomatis setiap 3 kolom mulai dari kolom ke-6 (indeks 5).")
 
-uploaded_file = st.file_uploader("Upload file 'Form Validasi Expert judgement (Jawaban)_2.xlsx'", type=["xlsx"])
+uploaded_file = st.file_uploader("Upload file 'Aitem PSP_2.xlsx'", type=["xlsx"])
 
 if uploaded_file:
-    with st.spinner("Sedang memproses seluruh baris..."):
+    with st.spinner("Sedang memproses pemetaan kolom..."):
         try:
-            processed_file, total_aitem = process_expert_mapping_final(uploaded_file)
+            processed_file, total_aitem = process_psp_mapping(uploaded_file)
             
-            st.success(f"Mapping Selesai! Berhasil memetakan **{total_aitem} aitem** dari seluruh baris input.")
+            st.success(f"Mapping Selesai! Berhasil memetakan **{total_aitem} aitem** secara presisi.")
+            st.info("Email, Timestamp, dan Universitas telah dibersihkan.")
             
             st.download_button(
                 label="📥 Download Excel Hasil Mapping",
                 data=processed_file,
-                file_name="Data_Expert_Judgement_Mapped.xlsx",
+                file_name="Aitem_PSP_Cleaned_Mapped.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         except Exception as e:
