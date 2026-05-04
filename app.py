@@ -291,7 +291,7 @@ elif st.session_state.step in [2, 3, 4]:
     with nav2:
         btn_label = "Lanjut ➡️" if st.session_state.step < 4 else "🚀 LANJUT KE PENGIRIMAN"
         if st.button(btn_label):
-            if False: st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
+            if errors: st.error(f"⚠️ Ada {len(errors)} soal yang belum lengkap pada halaman ini.")
             else: move_step(5 if st.session_state.step == 4 else st.session_state.step + 1); st.rerun()
 
 
