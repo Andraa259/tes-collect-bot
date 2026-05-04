@@ -6,3 +6,4 @@ gspread
 google-auth
 streamlit-scroll-to-top
 openpyxl
+xlsxwriter
