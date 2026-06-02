@@ -1,9 +1,4 @@
 streamlit
 pandas
-python-docx
-requests
-gspread
-google-auth
-streamlit-scroll-to-top
 openpyxl
-xlsxwriter
+plotly
