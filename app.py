@@ -133,7 +133,7 @@ if st.sidebar.button("🎲 Susun Agenda Bersih-Bersih", type="primary"):
                 ws["B3"].font = font_judul
                 ws["B3"].alignment = center_align
                 ws["B4"].font = font_judul
-                ws["B4"].alignment = center_alignment
+                ws["B4"].alignment = center_align
                 
                 ws.row_dimensions[3].height = 22
                 ws.row_dimensions[4].height = 22
