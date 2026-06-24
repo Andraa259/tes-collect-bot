@@ -71,7 +71,7 @@ if uploaded_pdf is not None and uploaded_excel is not None:
                         clean_name = clean_filename(formatted_name)
                         
                         # Set nama file PDF individu
-                        filename = f"Sertifikat_{clean_name}.pdf"
+                        filename = f"{clean_name}.pdf"
                         
                         # Proses pemotongan per halaman PDF
                         pdf_writer = PdfWriter()
