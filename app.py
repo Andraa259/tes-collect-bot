@@ -25,11 +25,11 @@ with col2:
 if uploaded_pdf is not None and uploaded_excel is not None:
     try:
         # 2. Baca File Excel / CSV dengan header di baris ke-2 (index 1)
+        # KODE YANG BENAR (Baru):
         if uploaded_excel.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_excel, header=1)
+            df = pd.read_csv(uploaded_excel)
         else:
-            df = pd.read_excel(uploaded_excel, header=1)
-            
+            df = pd.read_excel(uploaded_excel)
         # Bersihkan baris yang kolom 'Nama'-nya kosong
         if 'Nama' in df.columns:
             df = df.dropna(subset=['Nama']).reset_index(drop=True)
